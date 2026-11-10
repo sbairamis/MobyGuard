@@ -2,7 +2,6 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -29,7 +28,6 @@ var redisConnectionString = builder.Configuration.GetConnectionString("RedisConn
 builder.Services.AddValidatedOptions<JwtOptions>();
 builder.Services.AddValidatedOptions<RegistryTokenOptions>();
 builder.Services.AddValidatedOptions<HostingOptions>();
-builder.Services.AddValidatedOptions<CorsPolicyOptions>();
 
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
@@ -106,18 +104,6 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
 
 builder.Services.AddAuthorization();
 
-builder.Services.AddCors();
-
-builder.Services.AddOptions<CorsOptions>()
-    .Configure<IOptions<CorsPolicyOptions>>((corsOptions, corsPolicyOptions) =>
-    {
-        corsOptions.AddDefaultPolicy(policy => policy
-            .WithOrigins(corsPolicyOptions.Value.AllowedOrigins)
-            .AllowAnyHeader()
-            .AllowAnyMethod()
-            .SetPreflightMaxAge(TimeSpan.FromHours(1)));
-    });
-
 builder.Services.AddHttpContextAccessor();
 
 builder.Services.AddTransient<IUriService>(options =>
@@ -173,8 +159,6 @@ if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
 }
-
-app.UseCors();
 
 app.UseDefaultFiles();
 
