@@ -5,8 +5,8 @@
 <h1 align="center">MobyGuard</h1>
 
 <p align="center">
-  <b>The lightweight, self-hosted Docker & OCI Registry Control Plane.</b><br />
-  Fine-grained access control, ECDSA token authentication, and a modern dashboard for vanilla Docker Registry.
+  <b>Lightweight, self-hosted Docker and OCI Registry Control Plane.</b><br />
+  Fine-grained repository access control, ECDSA token authentication, and management dashboard for Docker Distribution.
 </p>
 
 <p align="center">
@@ -20,48 +20,55 @@
 
 ---
 
-## 💡 Why MobyGuard?
+## Why MobyGuard?
 
-Setting up a private, self-hosted Docker registry usually leaves teams stuck between two extremes:
+Organizations deploying private Docker registries typically face two limitations:
 
-1. **Vanilla Docker Distribution (`registry:2`)**:
-   * ❌ Primitive `htpasswd` basic authentication (all-or-nothing access).
-   * ❌ No fine-grained repository permissions (if a user has access, they can pull or overwrite *any* image).
-   * ❌ No web dashboard to view images, tags, layer sizes, or delete tags.
-2. **Enterprise Suites (e.g., Harbor)**:
-   * ❌ Heavyweight footprint (6–8 microservice containers, requiring 4GB–8GB+ RAM).
-   * ❌ Complex Helm charts and operational overhead for small-to-medium teams.
+* **Docker Distribution (`registry:2`) Limitations**:
+  * Relies on basic `htpasswd` authentication, granting all-or-nothing access to all images.
+  * Lacks repository-level authorization and cannot restrict user permissions by namespace.
+  * Does not provide a web management interface for browsing tags, inspecting manifests, or deleting images.
 
-**MobyGuard solves this dilemma.** It is a single, self-contained appliance (~80MB RAM) that acts as the **native Docker Registry v2 Token Server**, **Control Plane**, and **Web Dashboard** for vanilla Docker Distribution.
+* **Enterprise Registry Suites (e.g., Harbor) Overhead**:
+  * Requires substantial server resources (6 to 8 containers, 4GB to 8GB+ RAM).
+  * Involves complex deployment charts and operational maintenance overhead.
+
+**MobyGuard provides a focused solution**: A lightweight, single-appliance control plane (~80MB RAM) that adds native Docker Registry v2 token authentication, fine-grained access control lists, and an administrative dashboard directly on top of vanilla Docker Distribution.
 
 ---
 
-## ✨ Features
+## Features
 
-* 🛡️ **Native Docker v2 / OCI Token Authentication**:
+* **Docker v2 and OCI Token Authentication**:
   * Fully compliant with the [Docker Registry v2 Bearer Token Specification](https://distribution.github.io/distribution/spec/auth/token/).
-  * Works out-of-the-box with `docker login`, `docker pull`, and `docker push`.
-  * Asymmetric **ECDSA P-256 (`ES256`)** token signing with public JWKS (`/api/Token/jwks`).
-* 🔐 **Granular Repository Access Policies (ACL)**:
-  * Define per-user access with exact matches (`team-a/backend`), namespace wildcards (`team-a/*`), or global access (`*`).
-  * Explicit toggles for **Pull**, **Push**, and **Delete** actions.
-* 🐳 **Modern Registry Dashboard**:
-  * Explore repositories with **RFC 5988 catalog pagination** (supports 10,000+ repositories).
-  * Inspect OCI / Docker v2 manifests, digest hashes, layer sizes, and container configs.
-  * Delete image tags directly from the UI.
-* 👥 **Users & Headless Service Accounts**:
-  * Create human accounts (`Admin`, `User`) and headless automation accounts (`Service`) for CI/CD pipelines (GitHub Actions, GitLab CI, Drone).
-* ⚡ **Production Hardened**:
-  * `PBKDF2-HMAC-SHA512` password hashing with cryptographic salts.
-  * 15-minute JWT lifetime with Redis-backed refresh token rotation and **instant user-level revocation**.
-  * Redis-backed brute-force lockout for failed login attempts.
-  * Zero source maps served in production.
-* 📜 **Audit Trail**:
-  * Full audit logs recording issued registry tokens, tag deletions, user logins, and policy modifications.
+  * Compatible with standard `docker login`, `docker pull`, and `docker push` workflows.
+  * Asymmetric ECDSA P-256 (`ES256`) token signing with a public JWKS endpoint (`/api/Token/jwks`).
+
+* **Repository Access Control (ACL)**:
+  * Per-user policy scoping supporting exact matches (`team-a/backend`), namespace wildcards (`team-a/*`), or global access (`*`).
+  * Granular action control with independent toggles for **Pull**, **Push**, and **Delete** capabilities.
+
+* **Web Management Dashboard**:
+  * Catalog exploration with RFC 5988 pagination supporting large-scale registries (10,000+ repositories).
+  * OCI and Docker v2 manifest inspection, including media types, digest checksums, layer sizes, and container configurations.
+  * Image tag deletion workflows directly from the interface.
+
+* **User and Service Account Management**:
+  * User account provisioning with role assignments (`Admin`, `User`).
+  * Dedicated headless accounts (`Service`) designed for CI/CD automation pipelines (GitHub Actions, GitLab CI, Drone).
+
+* **Security Architecture**:
+  * High-iteration `PBKDF2-HMAC-SHA512` password hashing with unique per-user cryptographic salts.
+  * 15-minute JWT lifetime with Redis-backed refresh token rotation and instant user-level revocation.
+  * Rate-limiting and brute-force lockout protection via Redis.
+  * Hardened frontend delivery with sourcemap generation disabled in production builds.
+
+* **Audit Logging**:
+  * Structured audit trail recording token issuances, image deletions, user creations, and policy changes.
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
                   ┌────────────────────────────────────────┐
@@ -89,11 +96,12 @@ Setting up a private, self-hosted Docker registry usually leaves teams stuck bet
                └───────────┘   └───────────┘   └───────────┘
 ```
 
-Image layers (`/v2/`) stream directly between the client and Docker Registry for maximum throughput, while MobyGuard handles authentication, access evaluation, and dashboard management (`/api/`).
+* **Layer Streaming Decoupling**: Docker image layers (`/v2/`) stream directly between the Docker client and the Registry storage backend, avoiding overhead in the API process.
+* **Control Plane Isolation**: MobyGuard handles authentication (`/api/Token`), authorization evaluation, user administration, and dashboard functionality.
 
 ---
 
-## 🚀 Quick Start (Docker Compose)
+## Quick Start
 
 ### 1. Clone the Repository
 ```bash
@@ -114,65 +122,62 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 -node
 chmod 644 certs/*
 ```
 
-### 3. Configure the Environment
-Copy the example environment configuration:
+### 3. Configure Environment Variables
+Copy the template configuration file:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and set secure passwords:
-* `DB_USER_PASS`: PostgreSQL password.
-* `REDIS_PASS`: Redis password.
-* `JWT_SECURITY_KEY`: A random 32+ character string (e.g. `openssl rand -base64 32`).
+Set the required environment secrets in `.env`:
+* `DB_USER_PASS`: Password for PostgreSQL.
+* `REDIS_PASS`: Password for Redis.
+* `JWT_SECURITY_KEY`: A 32+ character string for signing session tokens (e.g., `openssl rand -base64 32`).
 
-### 4. Start the Stack
+### 4. Deploy the Services
 ```bash
 docker compose up -d
 ```
 
-### 5. Create the Initial Administrator Account
-1. Open your browser at **`http://localhost:5090`**.
-2. Complete the initial one-time Administrator setup form.
-3. You are ready to manage repositories, create users, and define access policies!
+### 5. Initialize the Administrator Account
+* Navigate to `http://localhost:5090` in your web browser.
+* Complete the initial administrator setup form.
 
 ---
 
-## 💻 Docker CLI Usage
+## Docker CLI Usage
 
-### 1. Log in from the Command Line
+### Authentication
 ```bash
 docker login localhost:5090
-# Username: your-username
-# Password: your-password
 ```
 
-### 2. Tag and Push an Image
+### Push Workflow
 ```bash
 docker tag my-app:latest localhost:5090/team-a/my-app:1.0.0
 docker push localhost:5090/team-a/my-app:1.0.0
 ```
 
-### 3. Pull an Image
+### Pull Workflow
 ```bash
 docker pull localhost:5090/team-a/my-app:1.0.0
 ```
 
-> **Note for CI/CD Pipelines**: Create a user with the **`Service`** role in the MobyGuard dashboard and assign it policy permissions. Use those credentials in your CI/CD runner secrets (`DOCKER_USERNAME`, `DOCKER_PASSWORD`).
+* **CI/CD Pipelines**: Provision an account with the `Service` role in the dashboard, grant appropriate repository permissions, and store the credentials in pipeline secrets (`DOCKER_USERNAME`, `DOCKER_PASSWORD`).
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 * **Backend**: [.NET 10 (C#)](https://dotnet.microsoft.com/) — ASP.NET Core Web API with Microsoft OpenAPI.
-* **Frontend**: [React 19](https://react.dev/) + [Vite](https://vitejs.dev/) embedded directly in `wwwroot`.
-* **Database**: [PostgreSQL 17](https://www.postgresql.org/) with `citext` for case-insensitive matching.
-* **Cache**: [Redis 8](https://redis.io/) for JWT revocation, sessions, and login rate-limiting.
-* **Token Signer**: Built-in cryptographic ECDSA `ES256` token generation.
-* **Testing**: Comprehensive xUnit v3 integration test suite using **Testcontainers**.
+* **Frontend**: [React 19](https://react.dev/) + [Vite](https://vitejs.dev/) embedded in `wwwroot`.
+* **Database**: [PostgreSQL 17](https://www.postgresql.org/) with `citext` for case-insensitive indexing.
+* **Cache**: [Redis 8](https://redis.io/) for JWT revocation, sessions, and rate-limiting.
+* **Token Signer**: Cryptographic ECDSA `ES256` token signing.
+* **Testing**: Integration testing with xUnit v3 and **Testcontainers**.
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the [MIT License](LICENSE).
