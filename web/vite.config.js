@@ -6,7 +6,8 @@ export default defineConfig({
   build: {
     outDir: '../MobyGuard/wwwroot',
     emptyOutDir: true,
-    assetsInlineLimit: 0
+    assetsInlineLimit: 0,
+    sourcemap: false
   },
   server: {
     proxy: {

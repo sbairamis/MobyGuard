@@ -30,6 +30,22 @@ export default function App() {
   }, [theme])
 
   useEffect(() => {
+    if (!user || setupRequired) {
+      document.title = setupRequired ? 'Setup Admin — MobyGuard' : 'Sign In — MobyGuard'
+      return
+    }
+    const titles = {
+      '/': 'Images & Tags — MobyGuard',
+      '/permissions': 'Policies — MobyGuard',
+      '/users': 'Users & Roles — MobyGuard',
+      '/audit': 'Audit Logs — MobyGuard',
+      '/profile': 'My Account — MobyGuard'
+    }
+    const matched = Object.keys(titles).find((p) => p !== '/' && route.startsWith(p))
+    document.title = titles[matched] || titles['/'] || 'MobyGuard'
+  }, [user, setupRequired, route])
+
+  useEffect(() => {
     const onHash = () => setRoute(window.location.hash.slice(1) || '/')
     const onUnauth = () => setUser(null)
     window.addEventListener('hashchange', onHash)
