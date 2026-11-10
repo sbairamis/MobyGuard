@@ -128,7 +128,7 @@ export default function App() {
       <aside>
         <div className="brand">
           <div className="brand-logo">
-            <Icon name="shield" size={18} />
+            <img src="/logo.png" alt="MobyGuard" />
           </div>
           <div className="brand-text">
             <b>MobyGuard</b>

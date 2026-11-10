@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { api } from '../api'
-import Icon from '../components/Icon'
 
 export default function AuthPage({ setupRequired, onAuthenticated, notify }) {
   const [username, setUsername] = useState('')
@@ -41,12 +40,12 @@ export default function AuthPage({ setupRequired, onAuthenticated, notify }) {
   return (
     <div className="auth-wrap">
       <form className="auth-card" onSubmit={handleSubmit}>
-        <div className="brand" style={{ padding: 0 }}>
-          <div className="brand-logo">
-            <Icon name="shield" size={18} />
+        <div className="brand" style={{ padding: 0, gap: 14 }}>
+          <div className="brand-logo" style={{ width: 42, height: 42, borderRadius: 11 }}>
+            <img src="/logo.png" alt="MobyGuard" />
           </div>
           <div className="brand-text">
-            <b>MobyGuard</b>
+            <b style={{ fontSize: 18 }}>MobyGuard</b>
             <span>Docker Registry v3 Auth & Access Control</span>
           </div>
         </div>
