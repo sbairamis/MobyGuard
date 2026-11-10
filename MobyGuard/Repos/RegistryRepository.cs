@@ -50,44 +50,76 @@ public class RegistryRepository(
                 }
             ]);
 
-            var response = await client.GetAsync("/v2/_catalog?n=1000");
+            var allRepoNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            string? nextUrl = "/v2/_catalog?n=100";
+            const int maxPages = 1000;
+            var pagesFetched = 0;
 
-            if (!response.IsSuccessStatusCode)
+            while (!string.IsNullOrEmpty(nextUrl) && pagesFetched < maxPages)
             {
-                logger.LogWarning("Upstream Docker Registry returned {StatusCode} on /v2/_catalog", response.StatusCode);
-                return Result<List<RegistryRepositoryDto>>.Failure(RepositoryStatus.BadRequest, ResponseMessages.RegistryUpstreamError);
+                pagesFetched++;
+                using var response = await client.GetAsync(nextUrl);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    logger.LogWarning("Upstream Docker Registry returned {StatusCode} on {Url}", response.StatusCode, nextUrl);
+                    return Result<List<RegistryRepositoryDto>>.Failure(RepositoryStatus.BadRequest, ResponseMessages.RegistryUpstreamError);
+                }
+
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                using var doc = await JsonDocument.ParseAsync(stream);
+
+                var pageCount = 0;
+                string? lastRepoInPage = null;
+
+                if (doc.RootElement.TryGetProperty("repositories", out var reposElement)
+                    && reposElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in reposElement.EnumerateArray())
+                    {
+                        var repoName = item.GetString();
+                        if (string.IsNullOrWhiteSpace(repoName))
+                        {
+                            continue;
+                        }
+
+                        allRepoNames.Add(repoName);
+                        lastRepoInPage = repoName;
+                        pageCount++;
+                    }
+                }
+
+                var linkNext = ExtractNextLink(response.Headers);
+                if (!string.IsNullOrEmpty(linkNext))
+                {
+                    nextUrl = linkNext;
+                }
+                else if (pageCount >= 100 && !string.IsNullOrEmpty(lastRepoInPage))
+                {
+                    nextUrl = $"/v2/_catalog?n=100&last={Uri.EscapeDataString(lastRepoInPage)}";
+                }
+                else
+                {
+                    nextUrl = null;
+                }
             }
 
-            await using var stream = await response.Content.ReadAsStreamAsync();
-            using var doc = await JsonDocument.ParseAsync(stream);
-
             var repositories = new List<RegistryRepositoryDto>();
-
-            if (doc.RootElement.TryGetProperty("repositories", out var reposElement)
-                && reposElement.ValueKind == JsonValueKind.Array)
+            foreach (var repoName in allRepoNames)
             {
-                foreach (var item in reposElement.EnumerateArray())
+                var (canPull, canPush, canDelete) = EvaluateUserRepoPermissions(repoName, isAdmin, permissions);
+                if (!canPull)
                 {
-                    var repoName = item.GetString();
-                    if (string.IsNullOrWhiteSpace(repoName))
-                    {
-                        continue;
-                    }
-
-                    var (canPull, canPush, canDelete) = EvaluateUserRepoPermissions(repoName, isAdmin, permissions);
-                    if (!canPull)
-                    {
-                        continue;
-                    }
-
-                    repositories.Add(new RegistryRepositoryDto
-                    {
-                        Name = repoName,
-                        CanPull = canPull,
-                        CanPush = canPush,
-                        CanDelete = canDelete
-                    });
+                    continue;
                 }
+
+                repositories.Add(new RegistryRepositoryDto
+                {
+                    Name = repoName,
+                    CanPull = canPull,
+                    CanPush = canPush,
+                    CanDelete = canDelete
+                });
             }
 
             return Result<List<RegistryRepositoryDto>>.Success(
@@ -131,42 +163,63 @@ public class RegistryRepository(
                 }
             ]);
 
-            var response = await client.GetAsync($"/v2/{repoName}/tags/list");
+            var allTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            string? nextTagsUrl = $"/v2/{repoName}/tags/list?n=100";
+            const int maxTagPages = 500;
+            var tagPagesFetched = 0;
 
-            if (response.StatusCode == HttpStatusCode.NotFound)
+            while (!string.IsNullOrEmpty(nextTagsUrl) && tagPagesFetched < maxTagPages)
             {
-                return Result<RegistryRepositoryTagsDto>.Success(new RegistryRepositoryTagsDto
+                tagPagesFetched++;
+                using var response = await client.GetAsync(nextTagsUrl);
+
+                if (response.StatusCode == HttpStatusCode.NotFound)
                 {
-                    Repository = repoName,
-                    Tags = [],
-                    CanPush = canPush,
-                    CanDelete = canDelete
-                });
-            }
+                    break;
+                }
 
-            if (!response.IsSuccessStatusCode)
-            {
-                return Result<RegistryRepositoryTagsDto>.Failure(RepositoryStatus.BadRequest, ResponseMessages.RegistryUpstreamError);
-            }
-
-            await using var stream = await response.Content.ReadAsStreamAsync();
-            using var doc = await JsonDocument.ParseAsync(stream);
-
-            var tags = new List<string>();
-
-            if (doc.RootElement.TryGetProperty("tags", out var tagsElement)
-                && tagsElement.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var item in tagsElement.EnumerateArray())
+                if (!response.IsSuccessStatusCode)
                 {
-                    var tag = item.GetString();
-                    if (!string.IsNullOrWhiteSpace(tag))
+                    return Result<RegistryRepositoryTagsDto>.Failure(RepositoryStatus.BadRequest, ResponseMessages.RegistryUpstreamError);
+                }
+
+                await using var stream = await response.Content.ReadAsStreamAsync();
+                using var doc = await JsonDocument.ParseAsync(stream);
+
+                var pageCount = 0;
+                string? lastTagInPage = null;
+
+                if (doc.RootElement.TryGetProperty("tags", out var tagsElement)
+                    && tagsElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in tagsElement.EnumerateArray())
                     {
-                        tags.Add(tag);
+                        var tag = item.GetString();
+                        if (!string.IsNullOrWhiteSpace(tag))
+                        {
+                            allTags.Add(tag);
+                            lastTagInPage = tag;
+                            pageCount++;
+                        }
                     }
+                }
+
+                var linkNext = ExtractNextLink(response.Headers);
+                if (!string.IsNullOrEmpty(linkNext))
+                {
+                    nextTagsUrl = linkNext;
+                }
+                else if (pageCount >= 100 && !string.IsNullOrEmpty(lastTagInPage))
+                {
+                    nextTagsUrl = $"/v2/{repoName}/tags/list?n=100&last={Uri.EscapeDataString(lastTagInPage)}";
+                }
+                else
+                {
+                    nextTagsUrl = null;
                 }
             }
 
+            var tags = allTags.ToList();
             tags.Sort(StringComparer.OrdinalIgnoreCase);
 
             return Result<RegistryRepositoryTagsDto>.Success(new RegistryRepositoryTagsDto
@@ -547,5 +600,54 @@ public class RegistryRepository(
         }
 
         return (canPull, canPush, canDelete);
+    }
+
+    internal static string? ExtractNextLink(HttpResponseHeaders headers)
+    {
+        if (!headers.TryGetValues("Link", out var linkHeaders))
+        {
+            return null;
+        }
+
+        foreach (var header in linkHeaders)
+        {
+            var links = header.Split(',');
+            foreach (var linkPart in links)
+            {
+                var segments = linkPart.Split(';');
+                if (segments.Length < 2)
+                {
+                    continue;
+                }
+
+                var isNext = false;
+                for (var i = 1; i < segments.Length; i++)
+                {
+                    var param = segments[i].Trim();
+                    if (param.Equals("rel=\"next\"", StringComparison.OrdinalIgnoreCase)
+                        || param.Equals("rel=next", StringComparison.OrdinalIgnoreCase))
+                    {
+                        isNext = true;
+                        break;
+                    }
+                }
+
+                if (isNext)
+                {
+                    var target = segments[0].Trim();
+                    if (target.StartsWith('<') && target.EndsWith('>'))
+                    {
+                        var uriString = target[1..^1];
+                        if (Uri.TryCreate(uriString, UriKind.RelativeOrAbsolute, out var parsedUri))
+                        {
+                            return parsedUri.IsAbsoluteUri ? parsedUri.PathAndQuery : uriString;
+                        }
+                        return uriString;
+                    }
+                }
+            }
+        }
+
+        return null;
     }
 }
