@@ -42,4 +42,13 @@ public class ResponseMessages
     public const string InvalidRepositoryPattern = "_invalidRepositoryPattern";
 
     public const string NoPermissionActionsSelected = "_noPermissionActionsSelected";
+
+
+    public const string SetupAlreadyCompleted = "_setupAlreadyCompleted";
+
+    public const string RegistryRepositoryAccessDenied = "_registryRepositoryAccessDenied";
+
+    public const string RegistryManifestNotFound = "_registryManifestNotFound";
+
+    public const string RegistryUpstreamError = "_registryUpstreamError";
 }

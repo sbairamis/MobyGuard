@@ -18,4 +18,7 @@ public class RegistryTokenOptions
 
     [Range(1, 1440)]
     public int TokenExpiryMinutes { get; init; } = 15;
+
+    [Required]
+    public string RegistryUrl { get; init; } = "http://registry:5000";
 }

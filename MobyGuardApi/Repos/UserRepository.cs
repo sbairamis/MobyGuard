@@ -27,6 +27,78 @@ public class UserRepository(
 {
     private readonly JwtOptions _jwtOptions = jwtOptions.Value;
 
+    public async Task<Result<SetupStatusDto>> GetSetupStatus()
+    {
+        try
+        {
+            var hasUsers = await context.Users.AnyAsync();
+            return Result<SetupStatusDto>.Success(new SetupStatusDto { SetupRequired = !hasUsers });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "An unexpected error occurred while checking setup status");
+            return Result<SetupStatusDto>.Failure(RepositoryStatus.InternalServerError, ResponseMessages.InternalServerError);
+        }
+    }
+
+    public async Task<Result<LoginResponseDto>> SetupInitialAdmin(SetupAdminDto dto)
+    {
+        try
+        {
+            if (await context.Users.AnyAsync())
+            {
+                return Result<LoginResponseDto>.Failure(RepositoryStatus.Conflict, ResponseMessages.SetupAlreadyCompleted);
+            }
+
+            var adminType = await context.UserTypes.FirstOrDefaultAsync(ut => ut.Type == Roles.Admin);
+            if (adminType is null)
+            {
+                return Result<LoginResponseDto>.Failure(RepositoryStatus.BadRequest, ResponseMessages.UserTypeNotFound);
+            }
+
+            var salt = PasswordHasher.GenerateSalt();
+            var now = DateTime.UtcNow;
+
+            var user = new User
+            {
+                Username = dto.Username.Trim(),
+                FirstName = dto.FirstName.Trim(),
+                LastName = dto.LastName.Trim(),
+                Email = dto.Email.Trim(),
+                Password = PasswordHasher.Hash(dto.Password, salt),
+                Salt = salt,
+                IsActive = true,
+                UserTypeId = adminType.Id,
+                LastLogin = now,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+
+            context.Users.Add(user);
+            context.AuditLogs.Add(new AuditLog(
+                username: user.Username,
+                description: nameof(AuditLogEnums.Description.User_Created)));
+
+            await context.SaveChangesAsync();
+
+            var token = GenerateJwtToken(user.Id, user.Username, adminType.Type);
+
+            return Result<LoginResponseDto>.Success(new LoginResponseDto
+            {
+                Id = user.Id,
+                Username = user.Username,
+                Email = user.Email,
+                UserType = adminType.Type,
+                Token = token
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "An unexpected error occurred while setting up the initial admin user");
+            return Result<LoginResponseDto>.Failure(RepositoryStatus.InternalServerError, ResponseMessages.InternalServerError);
+        }
+    }
+
     public async Task<Result<LoginResponseDto>> Login(LoginUserDto loginBodyDto, IPAddress? clientAddress)
     {
         try

@@ -1,14 +1,27 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM --platform=$BUILDPLATFORM node:22-alpine AS ui
 
-WORKDIR /app
+WORKDIR /web
 
-COPY *.csproj ./
+COPY web/package*.json ./
 
-RUN dotnet restore
+RUN npm install --no-audit --no-fund
 
-COPY . ./
+COPY web/ ./
 
-RUN dotnet publish -c Release -o out
+RUN npm run build
+
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+
+WORKDIR /src
+
+COPY MobyGuardApi/*.csproj ./MobyGuardApi/
+
+RUN dotnet restore ./MobyGuardApi/MobyGuardApi.csproj
+
+COPY MobyGuardApi/ ./MobyGuardApi/
+COPY --from=ui /MobyGuardApi/wwwroot ./MobyGuardApi/wwwroot/
+
+RUN dotnet publish ./MobyGuardApi/MobyGuardApi.csproj -c Release -o /app/out
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 

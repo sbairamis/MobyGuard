@@ -45,7 +45,10 @@ builder.Services.AddOpenApi();
 
 builder.Services.AddSingleton<RegistryTokenSigner>();
 
+builder.Services.AddHttpClient("DockerRegistry");
+
 builder.Services.AddScoped<AuditLogRepository>();
+builder.Services.AddScoped<RegistryRepository>();
 builder.Services.AddScoped<RepositoryPermissionRepository>();
 builder.Services.AddScoped<TokenRepository>();
 builder.Services.AddScoped<UserRepository>();
@@ -148,11 +151,17 @@ if (app.Environment.IsDevelopment())
 
 app.UseCors();
 
+app.UseDefaultFiles();
+
+app.UseStaticFiles();
+
 app.UseAuthentication();
 
 app.UseAuthorization();
 
 app.MapControllers();
+
+app.MapFallbackToFile("index.html");
 
 var hostingOptions = app.Services.GetRequiredService<IOptions<HostingOptions>>().Value;
 

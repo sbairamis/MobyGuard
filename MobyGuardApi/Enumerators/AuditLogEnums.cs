@@ -8,7 +8,8 @@ public class AuditLogEnums
         Token_Issued = 2,
         Permission_Created = 3,
         Permission_Updated = 4,
-        Permission_Deleted = 5
+        Permission_Deleted = 5,
+        Manifest_Deleted = 6
     }
 
     public enum SearchBy

@@ -10,6 +10,46 @@ namespace MobyGuardApi.Controllers;
 [Authorize]
 public class UserController(UserRepository repository) : CustomBaseController
 {
+    [HttpGet("setup-status")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(SetupStatusDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<SetupStatusDto>> GetSetupStatus()
+    {
+        var result = await repository.GetSetupStatus();
+
+        return HandleResult(result);
+    }
+
+    [HttpPost("setup")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(LoginResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<LoginResponseDto>> SetupInitialAdmin(SetupAdminDto setupAdminDto)
+    {
+        var result = await repository.SetupInitialAdmin(setupAdminDto);
+
+        return HandleResult(result);
+    }
+
+    [HttpGet("me")]
+    [Authorize(Roles = $"{Roles.Admin}, {Roles.User}")]
+    [ProducesResponseType(typeof(UserDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UserDto>> GetMe()
+    {
+        if (!TryGetCallerId(out var callerId))
+        {
+            return Unauthorized();
+        }
+
+        var result = await repository.GetById(callerId);
+
+        return HandleResult(result);
+    }
+
     [HttpPost("login")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(LoginResponseDto), StatusCodes.Status200OK)]
