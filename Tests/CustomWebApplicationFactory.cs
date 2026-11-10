@@ -69,15 +69,15 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     private void GenerateSelfSignedCert()
     {
-        using var rsa = RSA.Create(2048);
-        var req = new CertificateRequest("CN=mobyguard-token-issuer", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var ecdsa = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var req = new CertificateRequest("CN=mobyguard-token-issuer", ecdsa, HashAlgorithmName.SHA256);
         using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddYears(1));
 
         _certPath = Path.Combine(_certsDirectory, "registry-auth.crt");
         _keyPath = Path.Combine(_certsDirectory, "registry-auth.key");
 
         File.WriteAllText(_certPath, cert.ExportCertificatePem());
-        File.WriteAllText(_keyPath, rsa.ExportPkcs8PrivateKeyPem());
+        File.WriteAllText(_keyPath, ecdsa.ExportPkcs8PrivateKeyPem());
     }
 
     public async Task ResetDatabaseAsync()

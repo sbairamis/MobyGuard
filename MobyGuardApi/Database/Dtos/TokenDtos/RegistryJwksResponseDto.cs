@@ -13,6 +13,9 @@ public class RegistryJwkDto
     [JsonPropertyName("kty")]
     public string Kty { get; set; } = string.Empty;
 
+    [JsonPropertyName("crv")]
+    public string Crv { get; set; } = string.Empty;
+
     [JsonPropertyName("use")]
     public string Use { get; set; } = string.Empty;
 
@@ -22,11 +25,11 @@ public class RegistryJwkDto
     [JsonPropertyName("kid")]
     public string Kid { get; set; } = string.Empty;
 
-    [JsonPropertyName("n")]
-    public string N { get; set; } = string.Empty;
+    [JsonPropertyName("x")]
+    public string X { get; set; } = string.Empty;
 
-    [JsonPropertyName("e")]
-    public string E { get; set; } = string.Empty;
+    [JsonPropertyName("y")]
+    public string Y { get; set; } = string.Empty;
 
     [JsonPropertyName("x5c")]
     public List<string> X5c { get; set; } = [];

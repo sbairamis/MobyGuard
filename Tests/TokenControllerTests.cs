@@ -98,7 +98,7 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         using (payload)
         {
             Assert.Equal("JWT", header.RootElement.GetProperty("typ").GetString());
-            Assert.Equal("RS256", header.RootElement.GetProperty("alg").GetString());
+            Assert.Equal("ES256", header.RootElement.GetProperty("alg").GetString());
 
             var kid = header.RootElement.GetProperty("kid").GetString();
             Assert.False(string.IsNullOrWhiteSpace(kid));
@@ -108,13 +108,13 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
             Assert.Equal(JsonValueKind.Array, x5c.ValueKind);
             var certDer = Convert.FromBase64String(x5c[0].GetString()!);
             using var cert = X509CertificateLoader.LoadCertificate(certDer);
-            using var rsaPublic = cert.GetRSAPublicKey()!;
+            using var ecdsaPublic = cert.GetECDsaPublicKey()!;
 
-            var signatureValid = rsaPublic.VerifyData(
+            var signatureValid = ecdsaPublic.VerifyData(
                 Encoding.ASCII.GetBytes(signingInput),
                 signature,
                 HashAlgorithmName.SHA256,
-                RSASignaturePadding.Pkcs1);
+                DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
 
             Assert.True(signatureValid);
 
@@ -283,8 +283,9 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         var jwks = await response.Content.ReadFromJsonAsync<RegistryJwksResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(jwks);
         Assert.Single(jwks.Keys);
-        Assert.Equal("RSA", jwks.Keys[0].Kty);
-        Assert.Equal("RS256", jwks.Keys[0].Alg);
+        Assert.Equal("EC", jwks.Keys[0].Kty);
+        Assert.Equal("P-256", jwks.Keys[0].Crv);
+        Assert.Equal("ES256", jwks.Keys[0].Alg);
         Assert.False(string.IsNullOrWhiteSpace(jwks.Keys[0].Kid));
     }
 }

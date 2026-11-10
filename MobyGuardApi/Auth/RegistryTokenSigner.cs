@@ -15,7 +15,7 @@ public sealed class RegistryTokenSigner : IDisposable
 
     private readonly RegistryTokenOptions _options;
     private readonly X509Certificate2 _certificate;
-    private readonly RSA _privateKey;
+    private readonly ECDsa _privateKey;
     private readonly string _keyId;
     private readonly string _certBase64Der;
 
@@ -34,8 +34,8 @@ public sealed class RegistryTokenSigner : IDisposable
         }
 
         _certificate = X509Certificate2.CreateFromPemFile(_options.CertificatePath, _options.PrivateKeyPath);
-        _privateKey = _certificate.GetRSAPrivateKey()
-                      ?? throw new InvalidOperationException("The configured registry token certificate must have an RSA private key.");
+        _privateKey = _certificate.GetECDsaPrivateKey()
+                      ?? throw new InvalidOperationException("The configured registry token certificate must have an ECDSA private key.");
 
         _keyId = ComputeLibtrustKeyId(_certificate);
         _certBase64Der = Convert.ToBase64String(_certificate.RawData);
@@ -56,7 +56,7 @@ public sealed class RegistryTokenSigner : IDisposable
         var header = new Dictionary<string, object>
         {
             ["typ"] = "JWT",
-            ["alg"] = SecurityAlgorithms.RsaSha256,
+            ["alg"] = SecurityAlgorithms.EcdsaSha256,
             ["kid"] = _keyId,
             ["x5c"] = new[] { _certBase64Der }
         };
@@ -83,7 +83,7 @@ public sealed class RegistryTokenSigner : IDisposable
         var signatureBytes = _privateKey.SignData(
             Encoding.ASCII.GetBytes(signingInput),
             HashAlgorithmName.SHA256,
-            RSASignaturePadding.Pkcs1);
+            DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
 
         var signatureBase64 = Base64UrlEncoder.Encode(signatureBytes);
 
@@ -92,8 +92,8 @@ public sealed class RegistryTokenSigner : IDisposable
 
     public RegistryJwksResponseDto GetJwks()
     {
-        using var publicRsa = _certificate.GetRSAPublicKey()!;
-        var parameters = publicRsa.ExportParameters(false);
+        using var publicEcdsa = _certificate.GetECDsaPublicKey()!;
+        var parameters = publicEcdsa.ExportParameters(false);
 
         return new RegistryJwksResponseDto
         {
@@ -101,12 +101,13 @@ public sealed class RegistryTokenSigner : IDisposable
             [
                 new RegistryJwkDto
                 {
-                    Kty = "RSA",
+                    Kty = "EC",
+                    Crv = "P-256",
                     Use = "sig",
-                    Alg = SecurityAlgorithms.RsaSha256,
+                    Alg = SecurityAlgorithms.EcdsaSha256,
                     Kid = _keyId,
-                    N = Base64UrlEncoder.Encode(parameters.Modulus!),
-                    E = Base64UrlEncoder.Encode(parameters.Exponent!),
+                    X = Base64UrlEncoder.Encode(parameters.Q.X!),
+                    Y = Base64UrlEncoder.Encode(parameters.Q.Y!),
                     X5c = [_certBase64Der]
                 }
             ]

@@ -6,11 +6,11 @@ Docker Registry v3 (Distribution) Token Authentication & Repository Permission M
 
 ## 1. Generate the Signing Certificate & Private Key
 
-Generate a self-signed RSA keypair used by `MobyGuardApi` to sign Registry JWTs and by Distribution v3 to verify them:
+Generate a self-signed ECDSA P-256 (`ES256`) keypair used by `MobyGuardApi` to sign Registry JWTs and by Distribution v3 to verify them:
 
 ```bash
 mkdir -p certs
-openssl req -x509 -newkey rsa:4096 -sha256 -nodes \
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 -nodes \
   -keyout certs/registry-auth.key \
   -out certs/registry-auth.crt \
   -days 3650 \
@@ -76,7 +76,7 @@ location /v2/ {
 
 | Endpoint | Method | Auth | Description |
 | :--- | :--- | :--- | :--- |
-| `/api/Token` | `GET` | Basic Auth (`docker login`) | Issues RS256-signed Docker Registry v3 JWTs with evaluated `access` scopes (`pull`, `push`, `delete`). |
+| `/api/Token` | `GET` | Basic Auth (`docker login`) | Issues ES256-signed Docker Registry v3 JWTs with evaluated `access` scopes (`pull`, `push`, `delete`). |
 | `/api/Token/jwks` | `GET` | Anonymous | Returns the public JSON Web Key Set (`JWKS`) for the signing certificate. |
 | `/api/RepositoryPermission` | `GET`, `POST`, `PUT`, `DELETE` | Bearer JWT (`Admin` / `User`) | Manage per-user repository permissions (exact `team-a/app`, namespace wildcard `team-a/*`, or global `*`). |
 | `/api/User` | `GET`, `POST`, `PUT`, `DELETE` | Bearer JWT (`Admin` / `User`) | Manage users, passwords, and login (`POST /api/User/login`). |
