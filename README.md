@@ -72,7 +72,7 @@ Setting up a private, self-hosted Docker registry usually leaves teams stuck bet
            1. Basic Auth /api/Token   │  3. Bearer Token Pull/Push /v2/*
                                      ▼
                      ┌───────────────────────────────┐
-                     │      Nginx Reverse Proxy      │
+                     │    Reverse Proxy / Gateway    │
                      └───────┬───────────────┬───────┘
                              │               │
             /api/* (Control) │               │ /v2/* (Layer Streaming)
@@ -162,46 +162,6 @@ docker pull localhost:5090/team-a/my-app:1.0.0
 
 ---
 
-## 🌐 Production Reverse Proxy (Nginx)
-
-When exposing MobyGuard to your corporate intranet or public domain, place Nginx in front to route traffic efficiently:
-
-```nginx
-# Nginx Configuration
-server {
-    listen 443 ssl http2;
-    server_name registry.yourcompany.com;
-
-    ssl_certificate /etc/letsencrypt/live/registry.yourcompany.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/registry.yourcompany.com/privkey.pem;
-
-    # 1. Route Dashboard & Control Plane to MobyGuard
-    location / {
-        proxy_pass http://127.0.0.1:5090;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-
-    # 2. Route Docker Distribution Layer Blobs Directly to Registry
-    location /v2/ {
-        # Disable client upload limits for multi-gigabyte layers
-        client_max_body_size 0;
-        chunked_transfer_encoding on;
-
-        proxy_pass http://127.0.0.1:5000/v2/;
-        proxy_set_header Host $http_host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 900;
-    }
-}
-```
-
----
-
 ## 🛠️ Tech Stack
 
 * **Backend**: [.NET 10 (C#)](https://dotnet.microsoft.com/) — ASP.NET Core Web API with Microsoft OpenAPI.
@@ -210,16 +170,6 @@ server {
 * **Cache**: [Redis 8](https://redis.io/) for JWT revocation, sessions, and login rate-limiting.
 * **Token Signer**: Built-in cryptographic ECDSA `ES256` token generation.
 * **Testing**: Comprehensive xUnit v3 integration test suite using **Testcontainers**.
-
----
-
-## 🧪 Running Tests
-
-Integration tests run real PostgreSQL and Redis containers automatically via Testcontainers:
-
-```bash
-dotnet test
-```
 
 ---
 
