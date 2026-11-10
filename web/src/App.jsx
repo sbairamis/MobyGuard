@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { api, loadSession, saveSession } from './api'
 import Icon from './components/Icon'
 import AuthPage from './pages/AuthPage'
-import OverviewPage from './pages/OverviewPage'
 import RegistryPage from './pages/RegistryPage'
 import PermissionsPage from './pages/PermissionsPage'
 import UsersPage from './pages/UsersPage'
@@ -101,8 +100,7 @@ export default function App() {
 
   const navItems = [
     { section: 'Registry' },
-    { path: '/', label: 'Overview', icon: 'overview' },
-    { path: '/registry', label: 'Images & Tags', icon: 'box' },
+    { path: '/', label: 'Images & Tags', icon: 'box' },
     { section: 'Access Control' },
     { path: '/permissions', label: 'Policies', icon: 'shield' },
     { path: '/users', label: 'Users & Roles', icon: 'users' },
@@ -111,9 +109,8 @@ export default function App() {
     { path: '/profile', label: 'My Account', icon: 'user' }
   ]
 
-  let PageComponent = OverviewPage
-  if (route.startsWith('/registry')) PageComponent = RegistryPage
-  else if (route.startsWith('/permissions')) PageComponent = PermissionsPage
+  let PageComponent = RegistryPage
+  if (route.startsWith('/permissions')) PageComponent = PermissionsPage
   else if (route.startsWith('/users')) PageComponent = UsersPage
   else if (route.startsWith('/audit')) PageComponent = AuditLogsPage
   else if (route.startsWith('/profile')) PageComponent = ProfilePage
