@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM node:22-alpine AS ui
+FROM --platform=$BUILDPLATFORM node:lts-alpine AS ui
 
 WORKDIR /web
 
@@ -27,11 +27,15 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0
 
 WORKDIR /app
 
-COPY --from=build /app/out .
-
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /app/certs \
+    && chown -R app:app /app
+
+COPY --from=build --chown=app:app /app/out .
+
+USER app
 
 EXPOSE 5090
 
