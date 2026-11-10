@@ -56,7 +56,6 @@ export default function AuditLogsPage({ notify }) {
       <div className="page-head">
         <div>
           <h1>Audit Logs</h1>
-          <p className="sub">Complete history of issued Registry JWTs, manifest deletions, user creations, and permission changes</p>
         </div>
         <button onClick={() => loadLogs(pageNumber)} disabled={loading}>
           <Icon name="refresh" size={15} />

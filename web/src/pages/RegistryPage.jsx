@@ -103,7 +103,6 @@ export default function RegistryPage({ notify }) {
       <div className="page-head">
         <div>
           <h1>Registry Images & Tags</h1>
-          <p className="sub">Browse repositories, inspect OCI / Docker v2 manifests and layers, and manage image tags</p>
         </div>
         <button onClick={fetchRepositories} disabled={loadingRepos}>
           <Icon name="refresh" size={15} />

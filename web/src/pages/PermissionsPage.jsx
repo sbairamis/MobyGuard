@@ -136,11 +136,6 @@ export default function PermissionsPage({ user, notify }) {
       <div className="page-head">
         <div>
           <h1>Repository Permissions (Policies)</h1>
-          <p className="sub">
-            {isAdmin
-              ? 'Define fine-grained pull, push, and delete permissions per user using exact names ("mobyguard/app"), namespace wildcards ("mobyguard/*"), or global "*"'
-              : 'Your assigned repository access policies'}
-          </p>
         </div>
         {isAdmin && (
           <button className="primary" onClick={openAddModal}>

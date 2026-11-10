@@ -143,9 +143,6 @@ export default function UsersPage({ user: currentUser, notify }) {
       <div className="page-head">
         <div>
           <h1>Users & Service Accounts</h1>
-          <p className="sub">
-            Manage human users (<code>Admin</code>, <code>User</code>) and headless CI/CD accounts (<code>Service</code>)
-          </p>
         </div>
         {isAdmin && (
           <button className="primary" onClick={openAddModal}>

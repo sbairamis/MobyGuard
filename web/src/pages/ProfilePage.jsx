@@ -66,7 +66,6 @@ export default function ProfilePage({ notify }) {
       <div className="page-head">
         <div>
           <h1>My Account</h1>
-          <p className="sub">Update your profile details and Docker CLI / Web UI password</p>
         </div>
       </div>
 
