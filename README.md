@@ -106,17 +106,14 @@ Organizations deploying private Docker registries typically face two limitations
 
 ## Quick Start
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/sbairamis/mobyguard.git
-cd mobyguard/MobyGuard
-```
+Deploy MobyGuard with Docker Compose without needing to clone the source repository.
 
-### 2. Generate the Token Signing Certificate
-Generate the ECDSA P-256 (`ES256`) keypair used by MobyGuard to sign Registry JWTs and by Docker Registry to verify them:
+### 1. Create Working Directory and Generate Certificates
+Create a project folder and generate the ECDSA P-256 (`ES256`) keypair used by MobyGuard to sign Registry JWTs and by Docker Registry to verify them:
 
 ```bash
-mkdir -p certs
+mkdir -p mobyguard/certs && cd mobyguard
+
 openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 -nodes \
   -keyout certs/registry-auth.key \
   -out certs/registry-auth.crt \
@@ -125,20 +122,127 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 -node
 chmod 644 certs/*
 ```
 
-### 3. Configure Environment Variables
-Copy the template configuration file:
+### 2. Configure `compose.yml`
+Save the following configuration as `compose.yml` (or download it via `curl -O https://raw.githubusercontent.com/sbairamis/mobyguard/main/compose.yml`):
 
-```bash
-cp .env.example .env
+```yaml
+services:
+  mobyguard:
+    image: ghcr.io/sbairamis/mobyguard:${API_VERSION:-latest}
+    restart: unless-stopped
+    container_name: mobyguard
+    ports:
+      - "${API_PORT:-5090}:5090"
+    volumes:
+      - ${CERTS_DIR:-./certs}:/app/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Database & Redis Connections
+      - ConnectionStrings__DefaultConnection=${POSTGRES_CONN_STRING:-Host=postgres;Port=5432;Database=${DB_NAME:-mobyguard};Username=${DB_USER:-mobyguard};Password=${DB_USER_PASS};}
+      - ConnectionStrings__RedisConnection=${REDIS_CONN_STRING:-redis:6379,password=${REDIS_PASS}}
+
+      # Upstream Registry & Token Signing
+      - RegistryTokenOptions__RegistryUrl=${REGISTRY_URL:-http://registry:5000}
+      - RegistryTokenOptions__Issuer=${REGISTRY_TOKEN_ISSUER:-mobyguard-token-issuer}
+      - RegistryTokenOptions__Service=${REGISTRY_TOKEN_SERVICE:-registry}
+      - RegistryTokenOptions__CertificatePath=${REGISTRY_CERT_PATH:-/app/certs/registry-auth.crt}
+      - RegistryTokenOptions__PrivateKeyPath=${REGISTRY_KEY_PATH:-/app/certs/registry-auth.key}
+      - RegistryTokenOptions__TokenExpiryMinutes=${REGISTRY_TOKEN_EXPIRY_MIN:-15}
+
+      # Web Auth & JWT
+      - JwtOptions__Issuer=${JWT_ISSUER:-mobyguard}
+      - JwtOptions__Audience=${JWT_AUDIENCE:-mobyguard}
+      - JwtOptions__SecurityKey=${JWT_SECURITY_KEY}
+      - JwtOptions__AccessTokenExpiryMinutes=${ACCESS_TOKEN_EXPIRY_MIN:-15}
+      - JwtOptions__RefreshTokenExpiryDays=${REFRESH_TOKEN_EXPIRY_DAYS:-7}
+
+      # Hosting
+      - HostingOptions__Scheme=${HOSTING_SCHEME:-http}
+      - HostingOptions__Ip=${HOSTING_IP:-0.0.0.0}
+      - HostingOptions__Port=${API_PORT:-5090}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5090/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - default
+      - registry-net
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    container_name: mobyguard-postgres
+    ports:
+      - "${DB_PORT:-127.0.0.1:5432}:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER:-mobyguard}
+      POSTGRES_PASSWORD: ${DB_USER_PASS}
+      POSTGRES_DB: ${DB_NAME:-mobyguard}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-mobyguard} -d ${DB_NAME:-mobyguard}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:8.10-alpine
+    container_name: mobyguard-redis
+    restart: unless-stopped
+    volumes:
+      - ./data/redis:/data
+    environment:
+      - REDISCLI_AUTH=${REDIS_PASS}
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASS}
+      --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+networks:
+  registry-net:
+    external: true
 ```
 
-Set the required environment secrets in `.env`:
-* `DB_USER_PASS`: Password for PostgreSQL.
-* `REDIS_PASS`: Password for Redis.
-* `JWT_SECURITY_KEY`: A 32+ character string for signing session tokens (e.g., `openssl rand -base64 32`).
+### 3. Configure Environment Variables
+Create a `.env` file in the same directory (or download it via `curl -O https://raw.githubusercontent.com/sbairamis/mobyguard/main/.env.example && cp .env.example .env`):
+
+```bash
+cat << 'EOF' > .env
+# Database Credentials
+DB_USER_PASS=change_this_postgres_password
+
+# Redis Credentials
+REDIS_PASS=change_this_redis_password
+
+# Web UI Authentication (minimum 32 characters)
+JWT_SECURITY_KEY=generate_a_secure_random_32_character_security_key_here!
+
+# Upstream Docker Registry / CNCF Distribution URL
+REGISTRY_URL=http://registry:5000
+EOF
+```
+
+* **`JWT_SECURITY_KEY`**: Set a cryptographically secure random string with at least 32 characters (e.g., generated with `openssl rand -base64 32`).
+* **`REGISTRY_URL`**: Set the URL of your Docker Registry or CNCF Distribution instance.
 
 ### 4. Deploy the Services
+Ensure the shared Docker bridge network exists and start the containers:
+
 ```bash
+docker network create registry-net 2>/dev/null || true
 docker compose up -d
 ```
 

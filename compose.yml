@@ -1,0 +1,88 @@
+services:
+  mobyguard:
+    image: ghcr.io/sbairamis/mobyguard:${API_VERSION:-latest}
+    restart: unless-stopped
+    container_name: mobyguard
+    ports:
+      - "${API_PORT:-5090}:5090"
+    volumes:
+      - ${CERTS_DIR:-./certs}:/app/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Database & Redis Connections
+      - ConnectionStrings__DefaultConnection=${POSTGRES_CONN_STRING:-Host=postgres;Port=5432;Database=${DB_NAME:-mobyguard};Username=${DB_USER:-mobyguard};Password=${DB_USER_PASS};}
+      - ConnectionStrings__RedisConnection=${REDIS_CONN_STRING:-redis:6379,password=${REDIS_PASS}}
+
+      # Upstream Registry & Token Signing
+      - RegistryTokenOptions__RegistryUrl=${REGISTRY_URL:-http://registry:5000}
+      - RegistryTokenOptions__Issuer=${REGISTRY_TOKEN_ISSUER:-mobyguard-token-issuer}
+      - RegistryTokenOptions__Service=${REGISTRY_TOKEN_SERVICE:-registry}
+      - RegistryTokenOptions__CertificatePath=${REGISTRY_CERT_PATH:-/app/certs/registry-auth.crt}
+      - RegistryTokenOptions__PrivateKeyPath=${REGISTRY_KEY_PATH:-/app/certs/registry-auth.key}
+      - RegistryTokenOptions__TokenExpiryMinutes=${REGISTRY_TOKEN_EXPIRY_MIN:-15}
+
+      # Web Auth & JWT
+      - JwtOptions__Issuer=${JWT_ISSUER:-mobyguard}
+      - JwtOptions__Audience=${JWT_AUDIENCE:-mobyguard}
+      - JwtOptions__SecurityKey=${JWT_SECURITY_KEY}
+      - JwtOptions__AccessTokenExpiryMinutes=${ACCESS_TOKEN_EXPIRY_MIN:-15}
+      - JwtOptions__RefreshTokenExpiryDays=${REFRESH_TOKEN_EXPIRY_DAYS:-7}
+
+      # Hosting
+      - HostingOptions__Scheme=${HOSTING_SCHEME:-http}
+      - HostingOptions__Ip=${HOSTING_IP:-0.0.0.0}
+      - HostingOptions__Port=${API_PORT:-5090}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5090/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - default
+      - registry-net
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    container_name: mobyguard-postgres
+    ports:
+      - "${DB_PORT:-127.0.0.1:5432}:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER:-mobyguard}
+      POSTGRES_PASSWORD: ${DB_USER_PASS}
+      POSTGRES_DB: ${DB_NAME:-mobyguard}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-mobyguard} -d ${DB_NAME:-mobyguard}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:8.10-alpine
+    container_name: mobyguard-redis
+    restart: unless-stopped
+    volumes:
+      - ./data/redis:/data
+    environment:
+      - REDISCLI_AUTH=${REDIS_PASS}
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASS}
+      --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+networks:
+  registry-net:
+    external: true
