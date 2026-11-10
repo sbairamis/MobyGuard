@@ -18,6 +18,10 @@
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
 </p>
 
+<p align="center">
+  <img src="docs/screenshots/repositories.png" width="900" alt="MobyGuard Dashboard" style="border-radius: 8px;" />
+</p>
+
 ---
 
 ## Why MobyGuard?
@@ -65,6 +69,45 @@ Organizations deploying private Docker registries typically face two limitations
 
 * **Audit Logging**:
   * Structured audit trail recording token issuances, image deletions, user creations, and policy changes.
+
+---
+
+## Screenshots
+
+### Images & Manifest Inspector
+Browse catalog repositories, inspect OCI and Docker v2 image tags, examine layer sizes, and retrieve pull commands:
+
+<p align="center">
+  <img src="docs/screenshots/repositories.png" alt="Images & Manifests" />
+</p>
+
+### Access Control Policies
+Manage per-user repository authorization rules with exact or wildcard (`namespace/*`) patterns and granular Pull, Push, and Delete toggles:
+
+<p align="center">
+  <img src="docs/screenshots/policies.png" alt="Repository Access Control" />
+</p>
+
+### User & Service Account Management
+Provision human operator accounts and dedicated headless service accounts for CI/CD automation pipelines:
+
+<p align="center">
+  <img src="docs/screenshots/users.png" alt="User Management" />
+</p>
+
+### Audit Trail
+Monitor token issuances, administrative actions, client IP addresses, and timestamps:
+
+<p align="center">
+  <img src="docs/screenshots/audit-logs.png" alt="Audit Logs" />
+</p>
+
+### Authentication Interface
+Clean sign-in interface with ECDSA token authentication and administrative onboarding:
+
+<p align="center">
+  <img src="docs/screenshots/login.png" alt="Sign In" />
+</p>
 
 ---
 
