@@ -24,7 +24,7 @@
 
 Organizations deploying private Docker registries typically face two limitations:
 
-* **Docker Distribution (`registry:2`) Limitations**:
+* **Docker Registry & CNCF Distribution (`registry:2` / `registry:3`) Limitations**:
   * Relies on basic `htpasswd` authentication, granting all-or-nothing access to all images.
   * Lacks repository-level authorization and cannot restrict user permissions by namespace.
   * Does not provide a web management interface for browsing tags, inspecting manifests, or deleting images.
@@ -87,7 +87,7 @@ Organizations deploying private Docker registries typically face two limitations
                              ▼               ▼    (Bearer Token Auth)
                    ┌───────────────────┐   ┌───────────────────┐
                    │     MobyGuard     │   │  Docker Registry  │
-                   │  (Auth & Web UI)  │   │   (registry:2)    │
+                   │  (Auth & Web UI)  │   │ (registry:2 / v3) │
                    └─┬───────────────┬─┘   └─────────┬─────────┘
                      │               │               │
                      ▼               ▼               ▼
