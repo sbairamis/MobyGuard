@@ -1,10 +1,10 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc;
-using MobyGuardApi.Classes;
-using MobyGuardApi.Database.Dtos.RepositoryPermissionDtos;
-using MobyGuardApi.Enumerators;
-using MobyGuardApi.Pagination;
+using MobyGuard.Classes;
+using MobyGuard.Database.Dtos.RepositoryPermissionDtos;
+using MobyGuard.Enumerators;
+using MobyGuard.Pagination;
 
 namespace Tests;
 

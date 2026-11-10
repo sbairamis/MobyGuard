@@ -1,9 +1,9 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc;
-using MobyGuardApi.Classes;
-using MobyGuardApi.Database.Dtos.UserTypeDtos;
-using MobyGuardApi.Enumerators;
+using MobyGuard.Classes;
+using MobyGuard.Database.Dtos.UserTypeDtos;
+using MobyGuard.Enumerators;
 
 namespace Tests;
 

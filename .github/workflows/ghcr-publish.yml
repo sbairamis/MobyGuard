@@ -37,7 +37,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: ./MobyGuardApi/Dockerfile
+          file: ./MobyGuard/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |

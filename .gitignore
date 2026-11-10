@@ -367,6 +367,6 @@ FodyWeavers.xsd
 appsettings.json
 **/certs/*.key
 **/certs/*.crt
-MobyGuardApi/wwwroot/
+MobyGuard/wwwroot/
 
 

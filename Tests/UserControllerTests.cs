@@ -2,10 +2,10 @@ using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
-using MobyGuardApi.Classes;
-using MobyGuardApi.Database.Dtos.UserDtos;
-using MobyGuardApi.Enumerators;
-using MobyGuardApi.Global;
+using MobyGuard.Classes;
+using MobyGuard.Database.Dtos.UserDtos;
+using MobyGuard.Enumerators;
+using MobyGuard.Global;
 using StackExchange.Redis;
 
 namespace Tests;

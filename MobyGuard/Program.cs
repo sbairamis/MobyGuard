@@ -1,0 +1,179 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
+using MobyGuard.Auth;
+using MobyGuard.Configuration;
+using MobyGuard.Database.Context;
+using MobyGuard.Extensions;
+using MobyGuard.HealthChecks;
+using MobyGuard.Helpers;
+using MobyGuard.Pagination;
+using MobyGuard.Repos;
+using MobyGuard.Seeders;
+using StackExchange.Redis;
+
+var builder = WebApplication.CreateBuilder(args);
+
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+                       ?? throw new InvalidOperationException("Connection string 'DefaultConnection' could not be found.");
+
+var redisConnectionString = builder.Configuration.GetConnectionString("RedisConnection")
+                            ?? throw new InvalidOperationException("Connection string 'RedisConnection' could not be found.");
+
+builder.Services.AddValidatedOptions<JwtOptions>();
+builder.Services.AddValidatedOptions<RegistryTokenOptions>();
+builder.Services.AddValidatedOptions<HostingOptions>();
+
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor
+                             | ForwardedHeaders.XForwardedProto
+                             | ForwardedHeaders.XForwardedPrefix;
+
+    options.KnownIPNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
+builder.Services.AddControllers();
+
+builder.Services.AddOpenApi();
+
+builder.Services.AddSingleton<RegistryTokenSigner>();
+
+builder.Services.AddHttpClient("DockerRegistry");
+
+builder.Services.AddScoped<AuditLogRepository>();
+builder.Services.AddScoped<RegistryRepository>();
+builder.Services.AddScoped<RepositoryPermissionRepository>();
+builder.Services.AddScoped<TokenRepository>();
+builder.Services.AddScoped<UserRepository>();
+builder.Services.AddScoped<UserTypeRepository>();
+
+builder.Services.AddHealthChecks()
+    .AddCheck<DatabaseHealthCheck>("Database")
+    .AddCheck<RedisHealthCheck>("Redis")
+    .AddCheck<RegistryKeyHealthCheck>("RegistrySigningKey");
+
+builder.Services.AddScoped<RedisHelper>();
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
+
+builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
+    .Configure<IOptions<JwtOptions>>((options, jwtOptions) =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwtOptions.Value.Issuer,
+            ValidAudience = jwtOptions.Value.Audience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(jwtOptions.Value.SecurityKey)),
+            ClockSkew = TimeSpan.Zero
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async context =>
+            {
+                var subClaim = context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                               ?? context.Principal?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+                var jtiClaim = context.Principal?.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+
+                if (!int.TryParse(subClaim, out var userId) || string.IsNullOrWhiteSpace(jtiClaim))
+                {
+                    context.Fail("Invalid token claims.");
+                    return;
+                }
+
+                var redisHelper = context.HttpContext.RequestServices.GetRequiredService<RedisHelper>();
+
+                if (!await redisHelper.IsAccessTokenActive(userId, jtiClaim))
+                {
+                    context.Fail("Token has been revoked.");
+                }
+            }
+        };
+    });
+
+builder.Services.AddAuthorization();
+
+builder.Services.AddHttpContextAccessor();
+
+builder.Services.AddTransient<IUriService>(options =>
+{
+    var accessor = options.GetRequiredService<IHttpContextAccessor>();
+
+    var request = accessor?.HttpContext?.Request;
+
+    var uri = string.Concat(request?.Scheme, "://", request?.Host.ToUriComponent(), request?.PathBase.ToUriComponent());
+
+    return new UriService(uri);
+});
+
+builder.Services.AddDbContext<DatabaseContext>(options => options.UseNpgsql(connectionString));
+
+builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
+{
+    var redisOptions = ConfigurationOptions.Parse(redisConnectionString);
+
+    return ConnectionMultiplexer.Connect(redisOptions);
+});
+
+builder.Services.AddProblemDetails();
+
+var app = builder.Build();
+
+app.Services.GetRequiredService<IStartupValidator>().Validate();
+
+app.Services.GetRequiredService<RegistryTokenSigner>();
+
+app.Services.GetRequiredService<IConnectionMultiplexer>();
+
+app.UseForwardedHeaders();
+
+app.UseExceptionHandler();
+
+app.UseStatusCodePages();
+
+app.MapHealthChecks("/api/health");
+
+using (var scope = app.Services.CreateScope())
+{
+    var services = scope.ServiceProvider;
+
+    var dbContext = services.GetRequiredService<DatabaseContext>();
+
+    dbContext.Database.Migrate();
+
+    DbInitializer.Initialize(dbContext);
+}
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+app.UseDefaultFiles();
+
+app.UseStaticFiles();
+
+app.UseAuthentication();
+
+app.UseAuthorization();
+
+app.MapControllers();
+
+app.MapFallbackToFile("index.html");
+
+var hostingOptions = app.Services.GetRequiredService<IOptions<HostingOptions>>().Value;
+
+app.Run($"{hostingOptions.Scheme}://{hostingOptions.Ip}:{hostingOptions.Port}");
+
+public partial class Program { }

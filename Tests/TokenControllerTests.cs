@@ -8,12 +8,12 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
-using MobyGuardApi.Classes;
-using MobyGuardApi.Database.Context;
-using MobyGuardApi.Database.Dtos.RepositoryPermissionDtos;
-using MobyGuardApi.Database.Dtos.TokenDtos;
-using MobyGuardApi.Enumerators;
-using MobyGuardApi.Global;
+using MobyGuard.Classes;
+using MobyGuard.Database.Context;
+using MobyGuard.Database.Dtos.RepositoryPermissionDtos;
+using MobyGuard.Database.Dtos.TokenDtos;
+using MobyGuard.Enumerators;
+using MobyGuard.Global;
 
 namespace Tests;
 
