@@ -218,13 +218,10 @@ services:
       redis:
         condition: service_healthy
     environment:
-      ConnectionStrings__DefaultConnection: >-
-        Host=postgres;Port=5432;Database=${DB_NAME:-mobyguard};
-        Username=${DB_USER:-mobyguard};Password=${DB_USER_PASS};
-      ConnectionStrings__RedisConnection: >-
-        redis:6379,password=${REDIS_PASS}
-      RegistryTokenOptions__RegistryUrl: "${REGISTRY_URL:-http://registry:5000}"
-      JwtOptions__SecurityKey: "${JWT_SECURITY_KEY}"
+      ConnectionStrings__DefaultConnection: ${POSTGRES_CONN_STRING}
+      ConnectionStrings__RedisConnection: ${REDIS_CONN_STRING}
+      RegistryTokenOptions__RegistryUrl: ${REGISTRY_URL}
+      JwtOptions__SecurityKey: ${JWT_SECURITY_KEY}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5090/api/health"]
       interval: 10s
@@ -250,7 +247,7 @@ services:
     healthcheck:
       test:
         - "CMD-SHELL"
-        - "pg_isready -U ${DB_USER:-mobyguard} -d ${DB_NAME:-mobyguard}"
+        - "pg_isready -U ${DB_USER} -d ${DB_NAME}"
       interval: 10s
       timeout: 5s
       retries: 5
@@ -284,20 +281,26 @@ Create a `.env` file in the same directory (or copy from `.env.example`):
 
 ```bash
 cat << 'EOF' > .env
-# Database Credentials
+# Database Credentials & Connection String
+DB_USER=mobyguard
 DB_USER_PASS=change_this_postgres_password
+DB_NAME=mobyguard
+POSTGRES_CONN_STRING=Host=postgres;Port=5432;Database=mobyguard;Username=mobyguard;Password=change_this_postgres_password;
 
-# Redis Credentials
+# Redis Credentials & Connection String
 REDIS_PASS=change_this_redis_password
-
-# Web UI Authentication (minimum 32 characters)
-JWT_SECURITY_KEY=generate_a_secure_random_32_character_security_key_here!
+REDIS_CONN_STRING=redis:6379,password=change_this_redis_password
 
 # Upstream Docker Registry / CNCF Distribution URL
 REGISTRY_URL=http://registry:5000
+
+# Web UI Authentication (minimum 32 characters)
+JWT_SECURITY_KEY=generate_a_secure_random_32_character_security_key_here!
 EOF
 ```
 
+* **`POSTGRES_CONN_STRING`**: Connection string used by MobyGuard to connect to PostgreSQL.
+* **`REDIS_CONN_STRING`**: Connection string used by MobyGuard for session caching and rate-limiting.
 * **`JWT_SECURITY_KEY`**: Set a cryptographically secure random string with at least 32 characters (e.g., generated with `openssl rand -base64 32`).
 * **`REGISTRY_URL`**: Set the URL of your Docker Registry or CNCF Distribution instance.
 

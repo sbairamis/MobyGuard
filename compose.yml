@@ -13,13 +13,10 @@ services:
       redis:
         condition: service_healthy
     environment:
-      ConnectionStrings__DefaultConnection: >-
-        Host=postgres;Port=5432;Database=${DB_NAME:-mobyguard};
-        Username=${DB_USER:-mobyguard};Password=${DB_USER_PASS};
-      ConnectionStrings__RedisConnection: >-
-        redis:6379,password=${REDIS_PASS}
-      RegistryTokenOptions__RegistryUrl: "${REGISTRY_URL:-http://registry:5000}"
-      JwtOptions__SecurityKey: "${JWT_SECURITY_KEY}"
+      ConnectionStrings__DefaultConnection: ${POSTGRES_CONN_STRING}
+      ConnectionStrings__RedisConnection: ${REDIS_CONN_STRING}
+      RegistryTokenOptions__RegistryUrl: ${REGISTRY_URL}
+      JwtOptions__SecurityKey: ${JWT_SECURITY_KEY}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5090/api/health"]
       interval: 10s
@@ -37,15 +34,15 @@ services:
     ports:
       - "${DB_PORT:-127.0.0.1:5432}:5432"
     environment:
-      POSTGRES_USER: ${DB_USER:-mobyguard}
+      POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_USER_PASS}
-      POSTGRES_DB: ${DB_NAME:-mobyguard}
+      POSTGRES_DB: ${DB_NAME}
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
       test:
         - "CMD-SHELL"
-        - "pg_isready -U ${DB_USER:-mobyguard} -d ${DB_NAME:-mobyguard}"
+        - "pg_isready -U ${DB_USER} -d ${DB_NAME}"
       interval: 10s
       timeout: 5s
       retries: 5
