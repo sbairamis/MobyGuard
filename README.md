@@ -71,19 +71,20 @@ Organizations deploying private Docker registries typically face two limitations
 ## Architecture
 
 ```
-                  ┌────────────────────────────────────────┐
-                  │          Docker CLI / Kaniko           │
-                  │       (docker push / docker pull)      │
-                  └──────────────────┬─────────────────────┘
-                                     │
-           1. Basic Auth /api/Token   │  3. Bearer Token Pull/Push /v2/*
-                                     ▼
-                     ┌───────────────────────────────┐
+                             ┌───────────────────────────────┐
+                             │      Docker CLI / Kaniko      │
+                             │  (docker push / docker pull)  │
+                             └──────────┬─────────▲──────────┘
+                                        │         │
+                     1. Basic Auth      │         │ 2. Issue Signed JWT
+                     GET /api/Token     │         │    (Bearer Token)
+                                        ▼         │
+                     ┌────────────────────────────┴──┐
                      │    Reverse Proxy / Gateway    │
                      └───────┬───────────────┬───────┘
                              │               │
-            /api/* (Control) │               │ /v2/* (Layer Streaming)
-                             ▼               ▼
+            /api/* (Control) │               │ 3. Stream Layers /v2/*
+                             ▼               ▼    (Bearer Token Auth)
                    ┌───────────────────┐   ┌───────────────────┐
                    │     MobyGuard     │   │  Docker Registry  │
                    │  (Auth & Web UI)  │   │   (registry:2)    │
@@ -92,12 +93,14 @@ Organizations deploying private Docker registries typically face two limitations
                      ▼               ▼               ▼
                ┌───────────┐   ┌───────────┐   ┌───────────┐
                │PostgreSQL │   │   Redis   │   │  Storage  │
-               │ (citext)  │   │  (Cache)  │   │  Volume   │
+               │(Database) │   │  (Cache)  │   │  Volume   │
                └───────────┘   └───────────┘   └───────────┘
 ```
 
-* **Layer Streaming Decoupling**: Docker image layers (`/v2/`) stream directly between the Docker client and the Registry storage backend, avoiding overhead in the API process.
-* **Control Plane Isolation**: MobyGuard handles authentication (`/api/Token`), authorization evaluation, user administration, and dashboard functionality.
+* **Step 1 (Token Request)**: The Docker client requests an access token from MobyGuard (`/api/Token`) using HTTP Basic authentication.
+* **Step 2 (Token Issuance)**: MobyGuard evaluates the user's repository permissions in PostgreSQL and returns a cryptographically signed ECDSA `ES256` Bearer JWT.
+* **Step 3 (Layer Streaming)**: The Docker client presents the Bearer token directly to Docker Registry (`/v2/`), which verifies the signature and streams image layer blobs directly to storage.
+* **Control Plane Isolation**: MobyGuard handles authentication, authorization policy evaluation, user management, and dashboard operations without bottlenecking image layer transfers.
 
 ---
 
@@ -171,7 +174,7 @@ docker pull localhost:5090/team-a/my-app:1.0.0
 
 * **Backend**: [.NET 10 (C#)](https://dotnet.microsoft.com/) — ASP.NET Core Web API with Microsoft OpenAPI.
 * **Frontend**: [React 19](https://react.dev/) + [Vite](https://vitejs.dev/) embedded in `wwwroot`.
-* **Database**: [PostgreSQL 17](https://www.postgresql.org/) with `citext` for case-insensitive indexing.
+* **Database**: [PostgreSQL 17](https://www.postgresql.org/) for relational persistence and policy storage.
 * **Cache**: [Redis 8](https://redis.io/) for JWT revocation, sessions, and rate-limiting.
 * **Token Signer**: Cryptographic ECDSA `ES256` token signing.
 * **Testing**: Integration testing with xUnit v3 and **Testcontainers**.
