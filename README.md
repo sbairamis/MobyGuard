@@ -11,10 +11,10 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white" alt=".NET 10" />
-  <img src="https://img.shields.io/badge/React-18-61DAFB?logo=react&logoColor=black" alt="React 18" />
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19" />
   <img src="https://img.shields.io/badge/Docker-Registry_v2%2Fv3-2496ED?logo=docker&logoColor=white" alt="Docker Registry" />
   <img src="https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL" />
-  <img src="https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white" alt="Redis" />
+  <img src="https://img.shields.io/badge/Redis-8-DC382D?logo=redis&logoColor=white" alt="Redis 8" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
 </p>
 
@@ -205,9 +205,9 @@ server {
 ## 🛠️ Tech Stack
 
 * **Backend**: [.NET 10 (C#)](https://dotnet.microsoft.com/) — ASP.NET Core Web API with Microsoft OpenAPI.
-* **Frontend**: [React 18](https://react.dev/) + [Vite](https://vitejs.dev/) embedded directly in `wwwroot`.
+* **Frontend**: [React 19](https://react.dev/) + [Vite](https://vitejs.dev/) embedded directly in `wwwroot`.
 * **Database**: [PostgreSQL 17](https://www.postgresql.org/) with `citext` for case-insensitive matching.
-* **Cache**: [Redis 7](https://redis.io/) for JWT revocation, sessions, and login rate-limiting.
+* **Cache**: [Redis 8](https://redis.io/) for JWT revocation, sessions, and login rate-limiting.
 * **Token Signer**: Built-in cryptographic ECDSA `ES256` token generation.
 * **Testing**: Comprehensive xUnit v3 integration test suite using **Testcontainers**.
 
