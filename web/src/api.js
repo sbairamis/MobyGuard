@@ -17,7 +17,7 @@ const ERROR_MESSAGES = {
   _userTypeInUse: 'Cannot delete a role that is currently assigned to users.',
   _repositoryPermissionNotFound: 'Repository permission rule not found.',
   _repositoryPermissionAlreadyExists: 'A permission rule for this user and repository pattern already exists.',
-  _invalidRepositoryPattern: 'Invalid pattern. Use "*", "namespace/*", or a lowercase repository name like "olympia/app".',
+  _invalidRepositoryPattern: 'Invalid pattern. Use "*", "namespace/*", or a lowercase repository name like "mobyguard/app".',
   _noPermissionActionsSelected: 'Select at least one action (Pull, Push, or Delete).',
   _setupAlreadyCompleted: 'Initial setup has already been completed.',
   _registryRepositoryAccessDenied: 'You do not have permission for this repository operation.',

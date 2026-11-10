@@ -11,11 +11,13 @@ public class RedisHelper
 
     private readonly IDatabase _redisDB;
 
-    private string UserLoginAttemptsKeyNamespace { get; } = "User:LoginAttempts";
+    private string KeyPrefix { get; } = "com.mobeguard";
 
-    private string UserActiveTokensKeyNamespace { get; } = "User:ActiveTokens";
+    private string UserLoginAttemptsKeyNamespace => $"{KeyPrefix}:User:LoginAttempts";
 
-    private string UserRefreshTokensKeyNamespace { get; } = "User:RefreshTokens";
+    private string UserActiveTokensKeyNamespace => $"{KeyPrefix}:User:ActiveTokens";
+
+    private string UserRefreshTokensKeyNamespace => $"{KeyPrefix}:User:RefreshTokens";
 
     public RedisHelper(IConnectionMultiplexer connectionMultiplexer)
     {

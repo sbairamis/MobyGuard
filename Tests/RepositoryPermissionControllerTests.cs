@@ -32,7 +32,7 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
         var dto = new AddRepositoryPermissionDto
         {
             UserId = (int)PrimaryKeys.UserTypes.User,
-            RepositoryPattern = "olympia/firmwares-external-api",
+            RepositoryPattern = "mobyguard/backend-api",
             CanPull = true,
             CanPush = false,
             CanDelete = false
@@ -46,7 +46,7 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
         {
             var created = await response.Content.ReadFromJsonAsync<RepositoryPermissionDto>(cancellationToken: TestContext.Current.CancellationToken);
             Assert.NotNull(created);
-            Assert.Equal("olympia/firmwares-external-api", created.RepositoryPattern);
+            Assert.Equal("mobyguard/backend-api", created.RepositoryPattern);
             Assert.True(created.CanPull);
             Assert.False(created.CanPush);
         }
@@ -60,7 +60,7 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
         var dto = new AddRepositoryPermissionDto
         {
             UserId = (int)PrimaryKeys.UserTypes.User,
-            RepositoryPattern = "olympia/app",
+            RepositoryPattern = "mobyguard/app",
             CanPull = true
         };
 
@@ -102,7 +102,7 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
         var dto = new AddRepositoryPermissionDto
         {
             UserId = (int)PrimaryKeys.UserTypes.User,
-            RepositoryPattern = "olympia/app",
+            RepositoryPattern = "mobyguard/app",
             CanPull = false,
             CanPush = false,
             CanDelete = false
@@ -126,7 +126,7 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
             new AddRepositoryPermissionDto
             {
                 UserId = (int)PrimaryKeys.UserTypes.User,
-                RepositoryPattern = "olympia/app",
+                RepositoryPattern = "mobyguard/app",
                 CanPull = true,
                 CanPush = false
             },
@@ -138,7 +138,7 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
             $"/api/RepositoryPermission/{created!.Id}",
             new UpdateRepositoryPermissionDto
             {
-                RepositoryPattern = "olympia/app-v2",
+                RepositoryPattern = "mobyguard/app-v2",
                 CanPull = true,
                 CanPush = true,
                 CanDelete = false
@@ -151,7 +151,7 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
             $"/api/RepositoryPermission/{created.Id}",
             TestContext.Current.CancellationToken);
 
-        Assert.Equal("olympia/app-v2", updated!.RepositoryPattern);
+        Assert.Equal("mobyguard/app-v2", updated!.RepositoryPattern);
         Assert.True(updated.CanPush);
 
         var deleteResponse = await client.DeleteAsync($"/api/RepositoryPermission/{created.Id}", TestContext.Current.CancellationToken);

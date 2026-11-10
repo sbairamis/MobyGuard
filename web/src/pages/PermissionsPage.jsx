@@ -68,7 +68,7 @@ export default function PermissionsPage({ user, notify }) {
   function openAddModal() {
     setEditingRule(null)
     setFormUserId(usersList[0]?.id ? String(usersList[0].id) : '')
-    setFormPattern('olympia/*')
+    setFormPattern('mobyguard/*')
     setFormPull(true)
     setFormPush(false)
     setFormDelete(false)
@@ -138,7 +138,7 @@ export default function PermissionsPage({ user, notify }) {
           <h1>Repository Permissions (Policies)</h1>
           <p className="sub">
             {isAdmin
-              ? 'Define fine-grained pull, push, and delete permissions per user using exact names ("olympia/app"), namespace wildcards ("olympia/*"), or global "*"'
+              ? 'Define fine-grained pull, push, and delete permissions per user using exact names ("mobyguard/app"), namespace wildcards ("mobyguard/*"), or global "*"'
               : 'Your assigned repository access policies'}
           </p>
         </div>
@@ -169,7 +169,7 @@ export default function PermissionsPage({ user, notify }) {
             />
             <input
               type="text"
-              placeholder="Filter by pattern (e.g. olympia/*)…"
+              placeholder="Filter by pattern (e.g. mobyguard/*)…"
               value={filterPattern}
               onChange={(e) => setFilterPattern(e.target.value)}
               style={{ width: 260 }}
@@ -333,10 +333,10 @@ export default function PermissionsPage({ user, notify }) {
                 required
                 value={formPattern}
                 onChange={(e) => setFormPattern(e.target.value)}
-                placeholder="olympia/iot-api, olympia/*, or *"
+                placeholder="mobyguard/iot-api, mobyguard/*, or *"
               />
               <span className="field-hint">
-                Examples: <code>olympia/iot-api</code> (exact repo), <code>olympia/*</code> (entire namespace), or <code>*</code> (all repos + catalog).
+                Examples: <code>mobyguard/iot-api</code> (exact repo), <code>mobyguard/*</code> (entire namespace), or <code>*</code> (all repos + catalog).
               </span>
             </label>
 

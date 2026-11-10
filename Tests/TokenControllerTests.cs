@@ -128,13 +128,13 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     [Fact]
     public async Task GetToken_UserWithPullPermission_GrantsPullAndFiltersOutPush()
     {
-        await GrantPermissionAsync((int)PrimaryKeys.UserTypes.User, "olympia/firmwares-api", canPull: true, canPush: false);
+        await GrantPermissionAsync((int)PrimaryKeys.UserTypes.User, "mobyguard/backend-api", canPull: true, canPush: false);
 
         var client = CreateBasicAuthClient("User", "user");
 
         // Request both pull and push on a pull-only repository
         var response = await client.GetAsync(
-            "/api/Token?service=registry&scope=repository:olympia/firmwares-api:pull,push",
+            "/api/Token?service=registry&scope=repository:mobyguard/backend-api:pull,push",
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -148,7 +148,7 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
 
             var entry = access[0];
             Assert.Equal("repository", entry.GetProperty("type").GetString());
-            Assert.Equal("olympia/firmwares-api", entry.GetProperty("name").GetString());
+            Assert.Equal("mobyguard/backend-api", entry.GetProperty("name").GetString());
 
             var actions = entry.GetProperty("actions").EnumerateArray().Select(a => a.GetString()).ToList();
             Assert.Single(actions);
@@ -159,12 +159,12 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     [Fact]
     public async Task GetToken_UserWithoutPermissionOnRepo_ReturnsEmptyActionsInAccessClaim()
     {
-        await GrantPermissionAsync((int)PrimaryKeys.UserTypes.User, "olympia/allowed-repo", canPull: true, canPush: false);
+        await GrantPermissionAsync((int)PrimaryKeys.UserTypes.User, "mobyguard/allowed-repo", canPull: true, canPush: false);
 
         var client = CreateBasicAuthClient("User", "user");
 
         var response = await client.GetAsync(
-            "/api/Token?service=registry&scope=repository:olympia/secret-repo:pull",
+            "/api/Token?service=registry&scope=repository:mobyguard/secret-repo:pull",
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -174,7 +174,7 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         using (payload)
         {
             var entry = payload.RootElement.GetProperty("access")[0];
-            Assert.Equal("olympia/secret-repo", entry.GetProperty("name").GetString());
+            Assert.Equal("mobyguard/secret-repo", entry.GetProperty("name").GetString());
             Assert.Equal(0, entry.GetProperty("actions").GetArrayLength());
         }
     }
@@ -182,12 +182,12 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     [Fact]
     public async Task GetToken_WildcardNamespacePermission_MatchesAllReposInNamespace()
     {
-        await GrantPermissionAsync((int)PrimaryKeys.UserTypes.Service, "olympia/*", canPull: true, canPush: true);
+        await GrantPermissionAsync((int)PrimaryKeys.UserTypes.Service, "mobyguard/*", canPull: true, canPush: true);
 
         var client = CreateBasicAuthClient("Service", "service");
 
         var response = await client.GetAsync(
-            "/api/Token?service=registry&scope=repository:olympia/iot-gateway:pull,push&scope=repository:external/other:pull",
+            "/api/Token?service=registry&scope=repository:mobyguard/iot-gateway:pull,push&scope=repository:external/other:pull",
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -199,8 +199,8 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
             var access = payload.RootElement.GetProperty("access");
             Assert.Equal(2, access.GetArrayLength());
 
-            var olympiaActions = access[0].GetProperty("actions").EnumerateArray().Select(a => a.GetString()).ToList();
-            Assert.Equal(["pull", "push"], olympiaActions);
+            var mobyguardActions = access[0].GetProperty("actions").EnumerateArray().Select(a => a.GetString()).ToList();
+            Assert.Equal(["pull", "push"], mobyguardActions);
 
             var externalActions = access[1].GetProperty("actions").EnumerateArray().Select(a => a.GetString()).ToList();
             Assert.Empty(externalActions);

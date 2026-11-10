@@ -1,10 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
 using MobyGuardApi.Classes;
 using MobyGuardApi.Database.Dtos.UserDtos;
 using MobyGuardApi.Enumerators;
 using MobyGuardApi.Global;
+using StackExchange.Redis;
 
 namespace Tests;
 
@@ -44,6 +46,15 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         Assert.Equal("Admin", body.UserType);
         Assert.False(string.IsNullOrEmpty(body.Token));
         Assert.False(string.IsNullOrEmpty(body.RefreshToken));
+
+        // Verify keys in Redis use com.mobeguard namespace prefix
+        using var scope = _factory.Services.CreateScope();
+        var muxer = scope.ServiceProvider.GetRequiredService<IConnectionMultiplexer>();
+        var server = muxer.GetServers().First(s => !s.IsReplica);
+        var keys = server.Keys(pattern: "com.mobeguard:*").Select(k => (string)k!).ToList();
+        Assert.NotEmpty(keys);
+        Assert.Contains(keys, k => k.StartsWith("com.mobeguard:User:ActiveTokens:"));
+        Assert.Contains(keys, k => k.StartsWith("com.mobeguard:User:RefreshTokens:"));
     }
 
     [Fact]

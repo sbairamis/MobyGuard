@@ -288,7 +288,7 @@ public partial class RepositoryPermissionRepository(
 
         if (pattern.EndsWith("/*", StringComparison.Ordinal))
         {
-            var prefix = pattern[..^1]; // Keep trailing '/' (e.g. "olympia/")
+            var prefix = pattern[..^1]; // Keep trailing '/' (e.g. "mobyguard/")
             return repositoryName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
         }
 

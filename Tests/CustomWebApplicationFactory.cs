@@ -45,8 +45,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     {
         _dbContainer = new PostgreSqlBuilder("postgres:17-alpine")
             .WithDatabase("mobyguard_test")
-            .WithUsername("olympia")
-            .WithPassword("olympiarnd")
+            .WithUsername("mobyguard_test_user")
+            .WithPassword("mobyguard_test_pass")
             .Build();
 
         _redisContainer = new RedisBuilder("redis:7-alpine")
