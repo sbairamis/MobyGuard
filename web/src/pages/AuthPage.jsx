@@ -54,11 +54,11 @@ export default function AuthPage({ setupRequired, onAuthenticated, notify }) {
           <h1 style={{ fontSize: 18 }}>
             {setupRequired ? 'Create Initial Admin Account' : 'Sign in to MobyGuard'}
           </h1>
-          <p className="sub" style={{ fontSize: 13 }}>
-            {setupRequired
-              ? 'No users exist yet. Create the primary Administrator account to get started.'
-              : 'Enter your credentials to manage images, tags, users, and repository policies.'}
-          </p>
+          {setupRequired && (
+            <p className="sub" style={{ fontSize: 13 }}>
+              No users exist yet. Create the primary Administrator account to get started.
+            </p>
+          )}
         </div>
 
         {error && (
