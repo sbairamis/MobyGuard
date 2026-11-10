@@ -1,0 +1,66 @@
+services:
+  mobyguard-api:
+    image: io2.olympia-electronics.com/mobyguard-api:${API_VERSION:-latest}
+    restart: unless-stopped
+    container_name: mobyguard-api
+    volumes:
+      - ./configs/mobyguard/appsettings.json:/app/appsettings.json:ro
+      - ./configs/mobyguard/certs:/app/certs:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - ConnectionStrings__DefaultConnection=${POSTGRES_CONN_STRING}
+      - ConnectionStrings__RedisConnection=${REDIS_CONN_STRING}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5090/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - default
+      - registry-net
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    container_name: mobyguard-postgres
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_USER_PASS}
+      POSTGRES_DB: ${DB_NAME}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:8.6.3-alpine
+    container_name: mobyguard-redis
+    restart: unless-stopped
+    volumes:
+      - ./data/redis:/data
+    environment:
+      - REDISCLI_AUTH=${REDIS_PASS}
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASS}
+      --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+networks:
+  registry-net:
+    external: true
