@@ -1,14 +1,21 @@
 using System.Data.Common;
+using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
+using MobyGuardApi.Auth;
+using MobyGuardApi.Configuration;
 using MobyGuardApi.Database.Context;
 using MobyGuardApi.Database.Dtos.UserDtos;
 using MobyGuardApi.Database.Models;
@@ -110,7 +117,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 Username = name,
                 Salt = salt,
                 Password = PasswordHasher.Hash(name.ToLowerInvariant(), salt),
-                Email = $"{name.ToLowerInvariant()}@example.com",
                 IsActive = true,
                 UserTypeId = (int)userType,
                 CreatedAt = DateTime.UtcNow,
@@ -127,6 +133,31 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         var client = CreateClient();
 
         var username = userType.ToString();
+
+        if (userType == PrimaryKeys.UserTypes.Service)
+        {
+            using var scope = Services.CreateScope();
+            var jwtOptions = scope.ServiceProvider.GetRequiredService<IOptions<JwtOptions>>().Value;
+            var redisHelper = scope.ServiceProvider.GetRequiredService<RedisHelper>();
+            var jti = Guid.NewGuid().ToString("N");
+            var key = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(jwtOptions.SecurityKey));
+            var token = new JwtSecurityToken(
+                issuer: jwtOptions.Issuer,
+                audience: jwtOptions.Audience,
+                claims: new[]
+                {
+                    new Claim(JwtRegisteredClaimNames.Sub, ((int)userType).ToString()),
+                    new Claim(JwtRegisteredClaimNames.UniqueName, username),
+                    new Claim("role", Roles.Service),
+                    new Claim(JwtRegisteredClaimNames.Jti, jti)
+                },
+                expires: DateTime.UtcNow.AddMinutes(15),
+                signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
+
+            await redisHelper.StoreActiveAccessToken((int)userType, jti, TimeSpan.FromMinutes(15));
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", new JwtSecurityTokenHandler().WriteToken(token));
+            return client;
+        }
 
         var response = await client.PostAsJsonAsync(
             "/api/User/login",

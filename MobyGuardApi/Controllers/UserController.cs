@@ -1,3 +1,4 @@
+using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MobyGuardApi.Auth;
@@ -60,6 +61,38 @@ public class UserController(UserRepository repository) : CustomBaseController
     public async Task<ActionResult<LoginResponseDto>> Login(LoginUserDto loginUserDto)
     {
         var result = await repository.Login(loginUserDto, HttpContext.Connection.RemoteIpAddress);
+
+        return HandleResult(result);
+    }
+
+    [HttpPost("refresh")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(LoginResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<LoginResponseDto>> Refresh(RefreshTokenDto refreshTokenDto)
+    {
+        var result = await repository.Refresh(refreshTokenDto);
+
+        return HandleResult(result);
+    }
+
+    [HttpPost("logout")]
+    [Authorize(Roles = $"{Roles.Admin}, {Roles.User}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult> Logout([FromBody] RefreshTokenDto? refreshTokenDto)
+    {
+        if (!TryGetCallerId(out var callerId))
+        {
+            return Unauthorized();
+        }
+
+        var jti = User.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+
+        var result = await repository.Logout(refreshTokenDto, callerId, jti);
 
         return HandleResult(result);
     }

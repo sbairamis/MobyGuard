@@ -43,6 +43,114 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         Assert.Equal("Admin", body.Username);
         Assert.Equal("Admin", body.UserType);
         Assert.False(string.IsNullOrEmpty(body.Token));
+        Assert.False(string.IsNullOrEmpty(body.RefreshToken));
+    }
+
+    [Fact]
+    public async Task RefreshToken_WithValidToken_ReturnsNewTokensAndInvalidatesOldToken()
+    {
+        var loginResponse = await LoginFromAsync("203.0.113.10", "User", "user");
+        var loginBody = await loginResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(loginBody);
+        var originalRefreshToken = loginBody.RefreshToken;
+        Assert.False(string.IsNullOrEmpty(originalRefreshToken));
+
+        var client = _factory.CreateClient();
+        var refreshResponse = await client.PostAsJsonAsync(
+            "/api/User/refresh",
+            new RefreshTokenDto { RefreshToken = originalRefreshToken },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, refreshResponse.StatusCode);
+        var refreshBody = await refreshResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(refreshBody);
+        Assert.False(string.IsNullOrEmpty(refreshBody.Token));
+        Assert.False(string.IsNullOrEmpty(refreshBody.RefreshToken));
+        Assert.NotEqual(originalRefreshToken, refreshBody.RefreshToken);
+
+        // Attempting to reuse the consumed refresh token should fail with 401
+        var reuseResponse = await client.PostAsJsonAsync(
+            "/api/User/refresh",
+            new RefreshTokenDto { RefreshToken = originalRefreshToken },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, reuseResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task DeactivateUser_ImmediatelyRevokesAccessTokenAndRefreshToken()
+    {
+        var loginResponse = await LoginFromAsync("203.0.113.10", "User", "user");
+        var loginBody = await loginResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(loginBody);
+
+        var userClient = _factory.CreateClient();
+        userClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginBody.Token);
+
+        // Verify active token works
+        var meResponseBefore = await userClient.GetAsync("/api/User/me", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, meResponseBefore.StatusCode);
+
+        // Admin deactivates the user
+        var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+        var updateDto = new UpdateUserDto
+        {
+            Username = "User",
+            FirstName = "User",
+            LastName = "User",
+            UserTypeId = (int)PrimaryKeys.UserTypes.User,
+            IsActive = false
+        };
+
+        var updateResponse = await adminClient.PutAsJsonAsync(
+            $"/api/User/{(int)PrimaryKeys.UserTypes.User}",
+            updateDto,
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, updateResponse.StatusCode);
+
+        // The user's 15-minute access token must immediately be rejected with 401
+        var meResponseAfter = await userClient.GetAsync("/api/User/me", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, meResponseAfter.StatusCode);
+
+        // Refresh token must also fail immediately
+        var refreshResponse = await _factory.CreateClient().PostAsJsonAsync(
+            "/api/User/refresh",
+            new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
+            TestContext.Current.CancellationToken);
+        Assert.True(refreshResponse.StatusCode == HttpStatusCode.Unauthorized || refreshResponse.StatusCode == HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task DeleteUser_ImmediatelyRevokesAccessTokenAndRefreshToken()
+    {
+        var loginResponse = await LoginFromAsync("203.0.113.10", "User", "user");
+        var loginBody = await loginResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(loginBody);
+
+        var userClient = _factory.CreateClient();
+        userClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginBody.Token);
+
+        // Verify active token works
+        var meResponseBefore = await userClient.GetAsync("/api/User/me", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, meResponseBefore.StatusCode);
+
+        // Admin deletes the user
+        var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+        var deleteResponse = await adminClient.DeleteAsync(
+            $"/api/User/{(int)PrimaryKeys.UserTypes.User}",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+
+        // The deleted user's access token must immediately fail
+        var meResponseAfter = await userClient.GetAsync("/api/User/me", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, meResponseAfter.StatusCode);
+
+        // Refresh token must also fail
+        var refreshResponse = await _factory.CreateClient().PostAsJsonAsync(
+            "/api/User/refresh",
+            new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, refreshResponse.StatusCode);
     }
 
     [Fact]

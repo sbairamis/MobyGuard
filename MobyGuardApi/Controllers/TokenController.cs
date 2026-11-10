@@ -7,7 +7,7 @@ using MobyGuardApi.Repos;
 namespace MobyGuardApi.Controllers;
 
 [AllowAnonymous]
-public class whatTokenController(TokenRepository repository, RegistryTokenSigner tokenSigner) : CustomBaseController
+public class TokenController(TokenRepository repository, RegistryTokenSigner tokenSigner) : CustomBaseController
 {
     [HttpGet]
     [ProducesResponseType(typeof(RegistryTokenResponseDto), StatusCodes.Status200OK)]

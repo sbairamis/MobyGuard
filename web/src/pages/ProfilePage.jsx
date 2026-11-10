@@ -4,7 +4,6 @@ import { api } from '../api'
 export default function ProfilePage({ notify }) {
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
-  const [email, setEmail] = useState('')
   const [username, setUsername] = useState('')
   const [role, setRole] = useState('')
   const [loadingProfile, setLoadingProfile] = useState(true)
@@ -22,7 +21,6 @@ export default function ProfilePage({ notify }) {
           setRole(me.userType)
           setFirstName(me.firstName)
           setLastName(me.lastName)
-          setEmail(me.email)
         }
       })
       .catch(() => {})
@@ -35,8 +33,7 @@ export default function ProfilePage({ notify }) {
     try {
       await api.put('/api/User/me', {
         firstName: firstName.trim(),
-        lastName: lastName.trim(),
-        email: email.trim()
+        lastName: lastName.trim()
       })
       notify('Profile updated.', 'ok')
     } catch (err) {
@@ -101,11 +98,6 @@ export default function ProfilePage({ notify }) {
                   <input type="text" required value={lastName} onChange={(e) => setLastName(e.target.value)} />
                 </label>
               </div>
-
-              <label className="field">
-                Email Address
-                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
-              </label>
 
               <div>
                 <button type="submit" className="primary" disabled={savingProfile}>

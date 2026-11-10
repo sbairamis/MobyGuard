@@ -64,7 +64,6 @@ public class UserRepository(
                 Username = dto.Username.Trim(),
                 FirstName = dto.FirstName.Trim(),
                 LastName = dto.LastName.Trim(),
-                Email = dto.Email.Trim(),
                 Password = PasswordHasher.Hash(dto.Password, salt),
                 Salt = salt,
                 IsActive = true,
@@ -81,15 +80,15 @@ public class UserRepository(
 
             await context.SaveChangesAsync();
 
-            var token = GenerateJwtToken(user.Id, user.Username, adminType.Type);
+            var (accessToken, refreshToken) = await IssueAuthTokens(user.Id, user.Username, adminType.Type);
 
             return Result<LoginResponseDto>.Success(new LoginResponseDto
             {
                 Id = user.Id,
                 Username = user.Username,
-                Email = user.Email,
                 UserType = adminType.Type,
-                Token = token
+                Token = accessToken,
+                RefreshToken = refreshToken
             });
         }
         catch (Exception ex)
@@ -140,7 +139,7 @@ public class UserRepository(
 
             await redisHelper.ClearUserLoginRetries(user.Id, clientAddress);
 
-            var accessToken = GenerateJwtToken(user.Id, user.Username, user.UserType!.Type);
+            var (accessToken, refreshToken) = await IssueAuthTokens(user.Id, user.Username, user.UserType!.Type);
 
             user.LastLogin = DateTime.UtcNow;
 
@@ -150,9 +149,9 @@ public class UserRepository(
             {
                 Id = user.Id,
                 Username = user.Username,
-                Email = user.Email,
                 UserType = user.UserType!.Type,
                 Token = accessToken,
+                RefreshToken = refreshToken
             };
 
             return Result<LoginResponseDto>.Success(loginResponseDto);
@@ -162,6 +161,82 @@ public class UserRepository(
             logger.LogError(ex, "An unexpected error occurred while trying to authenticate user: {Username}", loginBodyDto.Username);
 
             return Result<LoginResponseDto>.Failure(RepositoryStatus.InternalServerError, ResponseMessages.InternalServerError);
+        }
+    }
+
+    public async Task<Result<LoginResponseDto>> Refresh(RefreshTokenDto refreshTokenDto)
+    {
+        try
+        {
+            var (isValid, userId) = await redisHelper.ConsumeRefreshToken(refreshTokenDto.RefreshToken);
+
+            if (!isValid)
+            {
+                return Result<LoginResponseDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidRefreshToken);
+            }
+
+            var user = await context.Users
+                .Include(u => u.UserType)
+                .FirstOrDefaultAsync(u => u.Id == userId);
+
+            if (user is null)
+            {
+                await redisHelper.DeleteUserEntries(userId);
+                return Result<LoginResponseDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidRefreshToken);
+            }
+
+            if (!user.IsActive)
+            {
+                await redisHelper.DeleteUserEntries(user.Id);
+                return Result<LoginResponseDto>.Failure(RepositoryStatus.Forbidden, ResponseMessages.UserIsInactive);
+            }
+
+            if (string.Equals(user.UserType?.Type, Roles.Service, StringComparison.OrdinalIgnoreCase))
+            {
+                await redisHelper.DeleteUserEntries(user.Id);
+                return Result<LoginResponseDto>.Failure(RepositoryStatus.Forbidden, ResponseMessages.ServiceAccountCannotLogin);
+            }
+
+            var (accessToken, newRefreshToken) = await IssueAuthTokens(user.Id, user.Username, user.UserType!.Type);
+
+            return Result<LoginResponseDto>.Success(new LoginResponseDto
+            {
+                Id = user.Id,
+                Username = user.Username,
+                UserType = user.UserType!.Type,
+                Token = accessToken,
+                RefreshToken = newRefreshToken
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "An unexpected error occurred while refreshing session token");
+
+            return Result<LoginResponseDto>.Failure(RepositoryStatus.InternalServerError, ResponseMessages.InternalServerError);
+        }
+    }
+
+    public async Task<Result> Logout(RefreshTokenDto? refreshTokenDto, int callerId, string? jti)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(jti))
+            {
+                await redisHelper.RevokeAccessToken(callerId, jti);
+            }
+
+            if (!string.IsNullOrWhiteSpace(refreshTokenDto?.RefreshToken))
+            {
+                await redisHelper.RevokeRefreshToken(refreshTokenDto.RefreshToken);
+            }
+
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "An unexpected error occurred while logging out user with id: {Id}", callerId);
+
+            return Result.Failure(RepositoryStatus.InternalServerError, ResponseMessages.InternalServerError);
         }
     }
 
@@ -230,11 +305,6 @@ public class UserRepository(
                 return Result<UserDto>.Failure(RepositoryStatus.Conflict, ResponseMessages.UserExists);
             }
 
-            if (await context.Users.AnyAsync(user => user.Email == addUserDto.Email))
-            {
-                return Result<UserDto>.Failure(RepositoryStatus.Conflict, ResponseMessages.EmailExists);
-            }
-
             var userType = await context.UserTypes.FirstOrDefaultAsync(ut => ut.Id == addUserDto.UserTypeId);
 
             if (userType is null)
@@ -249,7 +319,6 @@ public class UserRepository(
                 Username = addUserDto.Username,
                 FirstName = addUserDto.FirstName,
                 LastName = addUserDto.LastName,
-                Email = addUserDto.Email,
                 Password = PasswordHasher.Hash(addUserDto.Password, salt),
                 Salt = salt,
                 IsActive = true,
@@ -274,7 +343,6 @@ public class UserRepository(
                 Username = user.Username,
                 FirstName = user.FirstName,
                 LastName = user.LastName,
-                Email = user.Email,
                 IsActive = user.IsActive,
                 LastLogin = user.LastLogin,
                 UserTypeId = user.UserTypeId,
@@ -327,20 +395,13 @@ public class UserRepository(
                 return Result.Failure(RepositoryStatus.NotFound, ResponseMessages.UserNotFound);
             }
 
-            if (updateMeDto.Email != user.Email
-                && await context.Users.AnyAsync(other => other.Id != user.Id && other.Email == updateMeDto.Email))
-            {
-                return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.EmailExists);
-            }
-
             user.FirstName = updateMeDto.FirstName;
             user.LastName = updateMeDto.LastName;
-            user.Email = updateMeDto.Email;
             user.UpdatedAt = DateTime.UtcNow;
 
             await context.SaveChangesAsync();
 
-            await redisHelper.DeleteUserEntries(callerId);
+            await redisHelper.ClearAllUserLoginRetries(callerId);
 
             return Result.Success();
         }
@@ -363,12 +424,6 @@ public class UserRepository(
                 return Result.Failure(RepositoryStatus.NotFound, ResponseMessages.UserNotFound);
             }
 
-            if (updateUserDto.Email != user.Email
-                && await context.Users.AnyAsync(other => other.Id != user.Id && other.Email == updateUserDto.Email))
-            {
-                return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.EmailExists);
-            }
-
             // An admin who demoted or deactivated themselves could leave no active admin behind.
             if (user.Id == callerId && (updateUserDto.UserTypeId != user.UserTypeId || !updateUserDto.IsActive))
             {
@@ -386,17 +441,27 @@ public class UserRepository(
                 return Result.Failure(RepositoryStatus.BadRequest, ResponseMessages.UserTypeNotFound);
             }
 
+            var shouldInvalidateSessions = !updateUserDto.IsActive
+                                           || updateUserDto.UserTypeId != user.UserTypeId
+                                           || updateUserDto.Username != user.Username;
+
             user.Username = updateUserDto.Username;
             user.UserTypeId = updateUserDto.UserTypeId;
             user.IsActive = updateUserDto.IsActive;
             user.FirstName = updateUserDto.FirstName;
             user.LastName = updateUserDto.LastName;
-            user.Email = updateUserDto.Email;
             user.UpdatedAt = DateTime.UtcNow;
 
             await context.SaveChangesAsync();
 
-            await redisHelper.DeleteUserEntries(id);
+            if (shouldInvalidateSessions)
+            {
+                await redisHelper.DeleteUserEntries(id);
+            }
+            else
+            {
+                await redisHelper.ClearAllUserLoginRetries(id);
+            }
 
             return Result.Success();
         }
@@ -425,7 +490,7 @@ public class UserRepository(
                 return Result.Failure(RepositoryStatus.BadRequest, ResponseMessages.InvalidCurrentPassword);
             }
 
-            await SetPassword(user, changePasswordDto.Password);
+            await SetPassword(user, changePasswordDto.Password, invalidateSessions: false);
 
             return Result.Success();
         }
@@ -448,7 +513,7 @@ public class UserRepository(
                 return Result.Failure(RepositoryStatus.NotFound, ResponseMessages.UserNotFound);
             }
 
-            await SetPassword(user, resetPasswordDto.Password);
+            await SetPassword(user, resetPasswordDto.Password, invalidateSessions: true);
 
             return Result.Success();
         }
@@ -501,7 +566,7 @@ public class UserRepository(
         }
     }
 
-    private async Task SetPassword(User user, string newPassword)
+    private async Task SetPassword(User user, string newPassword, bool invalidateSessions)
     {
         var salt = PasswordHasher.GenerateSalt();
 
@@ -511,11 +576,22 @@ public class UserRepository(
 
         await context.SaveChangesAsync();
 
-        await redisHelper.DeleteUserEntries(user.Id);
+        if (invalidateSessions)
+        {
+            await redisHelper.DeleteUserEntries(user.Id);
+        }
+        else
+        {
+            await redisHelper.ClearAllUserLoginRetries(user.Id);
+        }
     }
 
-    private string GenerateJwtToken(int userId, string username, string role)
+    private async Task<(string AccessToken, string RefreshToken)> IssueAuthTokens(int userId, string username, string role)
     {
+        var jti = Guid.NewGuid().ToString("N");
+        var accessTokenExpiry = TimeSpan.FromMinutes(_jwtOptions.AccessTokenExpiryMinutes);
+        var refreshTokenExpiry = TimeSpan.FromDays(_jwtOptions.RefreshTokenExpiryDays);
+
         var securityKey = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(_jwtOptions.SecurityKey));
 
         var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
@@ -525,17 +601,23 @@ public class UserRepository(
             new Claim(JwtRegisteredClaimNames.Sub, userId.ToString()),
             new Claim(JwtRegisteredClaimNames.UniqueName, username),
             new Claim("role", role),
-            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new Claim(JwtRegisteredClaimNames.Jti, jti),
         };
 
         var token = new JwtSecurityToken(
             issuer: _jwtOptions.Issuer,
             audience: _jwtOptions.Audience,
             claims: claims,
-            expires: DateTime.UtcNow.AddDays(_jwtOptions.TokenExpiryDays),
+            expires: DateTime.UtcNow.Add(accessTokenExpiry),
             signingCredentials: credentials);
 
-        return new JwtSecurityTokenHandler().WriteToken(token);
+        var accessToken = new JwtSecurityTokenHandler().WriteToken(token);
+
+        await redisHelper.StoreActiveAccessToken(userId, jti, accessTokenExpiry);
+
+        var refreshToken = await redisHelper.CreateRefreshToken(userId, refreshTokenExpiry);
+
+        return (accessToken, refreshToken);
     }
 
     private readonly Expression<Func<User, UserDto>> ToUserDto = user => new UserDto
@@ -544,7 +626,6 @@ public class UserRepository(
         Username = user.Username,
         FirstName = user.FirstName,
         LastName = user.LastName,
-        Email = user.Email,
         IsActive = user.IsActive,
         LastLogin = user.LastLogin,
         UserTypeId = user.UserTypeId,

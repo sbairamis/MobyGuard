@@ -1,3 +1,5 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Cors.Infrastructure;
@@ -76,6 +78,29 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
             ValidAudience = jwtOptions.Value.Audience,
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(jwtOptions.Value.SecurityKey)),
             ClockSkew = TimeSpan.Zero
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async context =>
+            {
+                var subClaim = context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                               ?? context.Principal?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+                var jtiClaim = context.Principal?.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+
+                if (!int.TryParse(subClaim, out var userId) || string.IsNullOrWhiteSpace(jtiClaim))
+                {
+                    context.Fail("Invalid token claims.");
+                    return;
+                }
+
+                var redisHelper = context.HttpContext.RequestServices.GetRequiredService<RedisHelper>();
+
+                if (!await redisHelper.IsAccessTokenActive(userId, jtiClaim))
+                {
+                    context.Fail("Token has been revoked.");
+                }
+            }
         };
     });
 

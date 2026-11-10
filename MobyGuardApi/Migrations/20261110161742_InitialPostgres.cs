@@ -59,7 +59,6 @@ namespace MobyGuardApi.Migrations
                     LastName = table.Column<string>(type: "text", nullable: false),
                     Username = table.Column<string>(type: "text", nullable: false),
                     Password = table.Column<string>(type: "text", nullable: false),
-                    Email = table.Column<string>(type: "text", nullable: false),
                     LastLogin = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     IsActive = table.Column<bool>(type: "boolean", nullable: false),
                     Salt = table.Column<string>(type: "text", nullable: false),

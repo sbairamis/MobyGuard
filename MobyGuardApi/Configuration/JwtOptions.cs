@@ -15,6 +15,9 @@ public class JwtOptions
     [MinLength(32, ErrorMessage = "SecurityKey must be at least 32 characters long")]
     public string SecurityKey { get; init; } = string.Empty;
 
+    [Range(1, 1440)]
+    public int AccessTokenExpiryMinutes { get; init; } = 15;
+
     [Range(1, 365)]
-    public int TokenExpiryDays { get; init; }
+    public int RefreshTokenExpiryDays { get; init; } = 7;
 }

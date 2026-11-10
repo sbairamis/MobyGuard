@@ -6,7 +6,6 @@ export default function AuthPage({ setupRequired, onAuthenticated, notify }) {
   const [username, setUsername] = useState('')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
-  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -21,7 +20,6 @@ export default function AuthPage({ setupRequired, onAuthenticated, notify }) {
           username,
           firstName,
           lastName,
-          email,
           password
         })
         notify('Initial Admin account created.', 'ok')
@@ -113,17 +111,6 @@ export default function AuthPage({ setupRequired, onAuthenticated, notify }) {
                 />
               </label>
             </div>
-
-            <label className="field">
-              Email
-              <input
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@company.com"
-              />
-            </label>
           </>
         )}
 

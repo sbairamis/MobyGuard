@@ -72,7 +72,13 @@ export default function App() {
     setUser(loginResponse)
   }
 
-  function handleLogout() {
+  async function handleLogout() {
+    const existing = loadSession()
+    if (existing?.token) {
+      try {
+        await api.post('/api/User/logout', { refreshToken: existing.refreshToken })
+      } catch {}
+    }
     saveSession(null)
     setUser(null)
   }

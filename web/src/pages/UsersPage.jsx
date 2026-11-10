@@ -21,7 +21,6 @@ export default function UsersPage({ user: currentUser, notify }) {
   const [username, setUsername] = useState('')
   const [firstName, setFirstName] = useState('')
   const [lastName, setLastName] = useState('')
-  const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [userTypeId, setUserTypeId] = useState('')
   const [isActive, setIsActive] = useState(true)
@@ -64,7 +63,6 @@ export default function UsersPage({ user: currentUser, notify }) {
     setUsername('')
     setFirstName('')
     setLastName('')
-    setEmail('')
     setPassword('')
     const defaultRole = userTypes.find((t) => t.type === 'User') || userTypes[0]
     setUserTypeId(defaultRole ? String(defaultRole.id) : '2')
@@ -77,7 +75,6 @@ export default function UsersPage({ user: currentUser, notify }) {
     setUsername(u.username)
     setFirstName(u.firstName)
     setLastName(u.lastName)
-    setEmail(u.email)
     setUserTypeId(String(u.userTypeId))
     setIsActive(u.isActive)
     setModalMode('edit')
@@ -98,7 +95,6 @@ export default function UsersPage({ user: currentUser, notify }) {
           username: username.trim(),
           firstName: firstName.trim(),
           lastName: lastName.trim(),
-          email: email.trim(),
           password,
           userTypeId: Number(userTypeId)
         })
@@ -108,7 +104,6 @@ export default function UsersPage({ user: currentUser, notify }) {
           username: username.trim(),
           firstName: firstName.trim(),
           lastName: lastName.trim(),
-          email: email.trim(),
           userTypeId: Number(userTypeId),
           isActive
         })
@@ -215,7 +210,6 @@ export default function UsersPage({ user: currentUser, notify }) {
                 <th>Username</th>
                 <th>Role</th>
                 <th>Full Name</th>
-                <th>Email</th>
                 <th>Status</th>
                 <th>Last Login / Token</th>
                 {isAdmin && <th className="num">Actions</th>}
@@ -224,13 +218,13 @@ export default function UsersPage({ user: currentUser, notify }) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={isAdmin ? 8 : 7} className="empty">
+                  <td colSpan={isAdmin ? 7 : 6} className="empty">
                     <span className="spin" /> Loading accounts…
                   </td>
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin ? 8 : 7} className="empty">
+                  <td colSpan={isAdmin ? 7 : 6} className="empty">
                     No users found.
                   </td>
                 </tr>
@@ -247,7 +241,6 @@ export default function UsersPage({ user: currentUser, notify }) {
                       </span>
                     </td>
                     <td>{u.firstName} {u.lastName}</td>
-                    <td className="muted">{u.email}</td>
                     <td>
                       <span className={`badge ${u.isActive ? 'ok' : 'err'}`}>
                         {u.isActive ? 'Active' : 'Disabled'}
@@ -378,16 +371,6 @@ export default function UsersPage({ user: currentUser, notify }) {
                     />
                   </label>
                 </div>
-
-                <label className="field">
-                  Email
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </label>
 
                 {modalMode === 'add' && (
                   <label className="field">

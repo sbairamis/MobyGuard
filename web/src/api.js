@@ -2,12 +2,12 @@ const STORAGE_KEY = 'mobyguard_session'
 
 const ERROR_MESSAGES = {
   _invalidCredentials: 'Invalid username or password.',
+  _invalidRefreshToken: 'Your session has expired. Please sign in again.',
   _userIsInactive: 'This account has been deactivated.',
   _serviceAccountCannotLogin: 'Service accounts can only authenticate via Docker CLI (/api/Token), not the web UI.',
   _tooManyRequests: 'Too many failed login attempts. Please wait 15 minutes.',
   _userNotFound: 'User not found.',
   _userAlreadyExists: 'A user with that username already exists.',
-  _emailAlreadyExists: 'A user with that email address already exists.',
   _cannotDeleteYourself: 'You cannot delete your own account.',
   _cannotChangeOwnTypeOrStatus: 'You cannot demote or deactivate your own admin account.',
   _invalidCurrentPassword: 'Your current password is incorrect.',
@@ -48,7 +48,31 @@ export function saveSession(session) {
   }
 }
 
-async function request(method, path, body) {
+let refreshPromise = null
+
+async function doRefreshToken() {
+  const session = loadSession()
+  if (!session?.refreshToken) {
+    throw new Error('No refresh token available.')
+  }
+
+  const res = await fetch('/api/User/refresh', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken: session.refreshToken })
+  })
+
+  if (!res.ok) {
+    throw new Error('Refresh token invalid or expired.')
+  }
+
+  const refreshed = await res.json()
+  const updatedSession = { ...session, ...refreshed }
+  saveSession(updatedSession)
+  return updatedSession
+}
+
+async function request(method, path, body, isRetry = false) {
   const session = loadSession()
   const headers = {}
   if (session?.token) {
@@ -73,9 +97,26 @@ async function request(method, path, body) {
   const data = isJson ? await res.json().catch(() => null) : await res.text().catch(() => '')
 
   if (!res.ok) {
-    if (res.status === 401 && !path.includes('/login')) {
-      saveSession(null)
-      window.dispatchEvent(new CustomEvent('mobyguard:unauthorized'))
+    const isAuthEndpoint = path.includes('/login') || path.includes('/setup') || path.includes('/refresh')
+    if (res.status === 401 && !isRetry && !isAuthEndpoint) {
+      const currentSession = loadSession()
+      if (currentSession?.refreshToken) {
+        try {
+          if (!refreshPromise) {
+            refreshPromise = doRefreshToken().finally(() => {
+              refreshPromise = null
+            })
+          }
+          await refreshPromise
+          return await request(method, path, body, true)
+        } catch {
+          saveSession(null)
+          window.dispatchEvent(new CustomEvent('mobyguard:unauthorized'))
+        }
+      } else {
+        saveSession(null)
+        window.dispatchEvent(new CustomEvent('mobyguard:unauthorized'))
+      }
     }
     const detail = data?.detail || data?.title || (typeof data === 'string' && data) || `HTTP ${res.status}`
     throw new Error(formatErrorMessage(detail))

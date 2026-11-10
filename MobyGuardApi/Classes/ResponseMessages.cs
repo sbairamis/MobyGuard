@@ -8,6 +8,8 @@ public class ResponseMessages
 
     public const string InvalidCredentials = "_invalidCredentials";
 
+    public const string InvalidRefreshToken = "_invalidRefreshToken";
+
     public const string UserIsInactive = "_userIsInactive";
 
     public const string ServiceAccountCannotLogin = "_serviceAccountCannotLogin";
@@ -16,8 +18,6 @@ public class ResponseMessages
     public const string UserNotFound = "_userNotFound";
 
     public const string UserExists = "_userAlreadyExists";
-
-    public const string EmailExists = "_emailAlreadyExists";
 
     public const string CannotDeleteYourself = "_cannotDeleteYourself";
 

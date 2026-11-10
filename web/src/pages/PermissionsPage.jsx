@@ -313,7 +313,7 @@ export default function PermissionsPage({ user, notify }) {
                   <option value="" disabled>Select user…</option>
                   {usersList.map((u) => (
                     <option key={u.id} value={u.id}>
-                      {u.username} ({u.userType} — {u.email})
+                      {u.username} ({u.userType} — {u.firstName} {u.lastName})
                     </option>
                   ))}
                 </select>
