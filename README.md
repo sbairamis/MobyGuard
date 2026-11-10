@@ -152,7 +152,7 @@ Clean sign-in interface with ECDSA token authentication and administrative onboa
 Deploy MobyGuard with Docker Compose without needing to clone the source repository.
 
 ### 1. Create Working Directory and Generate Certificates
-Create a project folder and generate the ECDSA P-256 (`ES256`) keypair used by MobyGuard to sign Registry JWTs and by Docker Registry to verify them:
+Create a project folder and generate the ECDSA P-256 (`ES256`) keypair used for Docker Registry token authentication:
 
 ```bash
 mkdir -p mobyguard/certs && cd mobyguard
@@ -163,6 +163,40 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -sha256 -node
   -days 3650 \
   -subj "/CN=mobyguard-token-issuer"
 chmod 644 certs/*
+```
+
+#### Certificate Roles and Trust Relationship
+* **Asymmetric ECDSA (`ES256`)**: MobyGuard implements the [Docker Registry v2 Bearer Token Specification](https://distribution.github.io/distribution/spec/auth/token/). Token generation uses elliptic curve cryptography (`prime256v1`), delivering the security strength of 3072-bit RSA with smaller token payload sizes and faster verification.
+* **`certs/registry-auth.key` (Private Key)**:
+  * Kept strictly confidential by MobyGuard.
+  * Mounted into the MobyGuard container at `/app/certs/registry-auth.key`.
+  * Used exclusively by MobyGuard's `/api/Token` endpoint to sign outgoing Bearer JWTs granted to Docker CLI clients.
+* **`certs/registry-auth.crt` (Public Certificate)**:
+  * Contains the public key and issuer identity (`CN=mobyguard-token-issuer`).
+  * Mounted into both MobyGuard and the Docker Registry container.
+  * Docker Registry uses this certificate as its root trust bundle to verify the signature of incoming Bearer tokens without requiring access to the private key.
+
+#### Parameter Breakdown
+* `-x509`: Generates a self-signed X.509 certificate directly instead of a certificate signing request.
+* `-newkey ec -pkeyopt ec_paramgen_curve:prime256v1`: Generates an ECDSA private key using the NIST P-256 curve.
+* `-sha256`: Signs the certificate using the SHA-256 digest algorithm.
+* `-nodes`: Stores the private key unencrypted so container services can load it unattended on startup.
+* `-days 3650`: Sets a 10-year validity period for internal service authentication.
+* `-subj "/CN=mobyguard-token-issuer"`: Sets the subject Common Name matching the configured token issuer.
+* `chmod 644 certs/*`: Grants read access to the container process while preventing unauthorized host modifications.
+
+#### Upstream Docker Registry Configuration
+To configure Docker Registry (or CNCF Distribution) to authenticate via MobyGuard using this certificate, apply the following settings to your registry container:
+
+```yaml
+environment:
+  REGISTRY_AUTH: token
+  REGISTRY_AUTH_TOKEN_REALM: https://registry.example.com/api/Token
+  REGISTRY_AUTH_TOKEN_SERVICE: registry
+  REGISTRY_AUTH_TOKEN_ISSUER: mobyguard-token-issuer
+  REGISTRY_AUTH_TOKEN_ROOTCERTBUNDLE: /certs/registry-auth.crt
+volumes:
+  - ./certs/registry-auth.crt:/certs/registry-auth.crt:ro
 ```
 
 ### 2. Configure `compose.yml`
@@ -283,23 +317,56 @@ docker compose up -d
 
 ## Docker CLI Usage
 
-### Authentication
+Replace `registry.example.com` with your registry's fully qualified domain name or IP address.
+
+### 1. Authentication
+Authenticate with an administrator, standard user, or dedicated CI/CD service account:
+
 ```bash
-docker login localhost:5090
+docker login registry.example.com
 ```
 
-### Push Workflow
+For non-interactive environments (scripts or automated builds):
+
 ```bash
-docker tag my-app:latest localhost:5090/team-a/my-app:1.0.0
-docker push localhost:5090/team-a/my-app:1.0.0
+echo "$DOCKER_PASSWORD" | docker login registry.example.com -u "$DOCKER_USERNAME" --password-stdin
 ```
 
-### Pull Workflow
+### 2. Push Workflow
+Tag a local image with a repository path matching an authorized ACL policy (e.g., `team-a/*` with `Push` permission enabled):
+
 ```bash
-docker pull localhost:5090/team-a/my-app:1.0.0
+docker tag my-app:1.0.0 registry.example.com/team-a/my-app:1.0.0
+docker push registry.example.com/team-a/my-app:1.0.0
 ```
 
-* **CI/CD Pipelines**: Provision an account with the `Service` role in the dashboard, grant appropriate repository permissions, and store the credentials in pipeline secrets (`DOCKER_USERNAME`, `DOCKER_PASSWORD`).
+### 3. Pull Workflow
+Pull images matching an authorized ACL policy (requiring `Pull` permission):
+
+```bash
+docker pull registry.example.com/team-a/my-app:1.0.0
+```
+
+### 4. CI/CD Pipeline Automation
+For headless CI/CD systems (GitHub Actions, GitLab CI, Drone, Jenkins):
+* **Account Provisioning**: Create a dedicated account with the `Service` role in the MobyGuard dashboard (e.g., `github-runner`).
+* **Policy Assignment**: Grant targeted repository permissions (e.g., `team-a/*` with `Pull` and `Push` enabled).
+* **Pipeline Configuration**: Inject credentials through pipeline secrets. Example for GitHub Actions:
+
+```yaml
+- name: Log in to Docker Registry
+  uses: docker/login-action@v3
+  with:
+    registry: registry.example.com
+    username: ${{ secrets.REGISTRY_USERNAME }}
+    password: ${{ secrets.REGISTRY_PASSWORD }}
+
+- name: Build and Push Image
+  uses: docker/build-push-action@v6
+  with:
+    push: true
+    tags: registry.example.com/team-a/my-app:${{ github.sha }}
+```
 
 ---
 
