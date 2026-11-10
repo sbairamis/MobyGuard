@@ -63,7 +63,7 @@ public class RegistryRepository(
                 if (!response.IsSuccessStatusCode)
                 {
                     logger.LogWarning("Upstream Docker Registry returned {StatusCode} on {Url}", response.StatusCode, nextUrl);
-                    return Result<List<RegistryRepositoryDto>>.Failure(RepositoryStatus.BadRequest, ResponseMessages.RegistryUpstreamError);
+                    return Result<List<RegistryRepositoryDto>>.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
                 }
 
                 await using var stream = await response.Content.ReadAsStreamAsync();
@@ -128,7 +128,7 @@ public class RegistryRepository(
         catch (HttpRequestException ex)
         {
             logger.LogWarning(ex, "Unable to reach upstream Docker Registry at {RegistryUrl}", _options.RegistryUrl);
-            return Result<List<RegistryRepositoryDto>>.Failure(RepositoryStatus.BadRequest, ResponseMessages.RegistryUpstreamError);
+            return Result<List<RegistryRepositoryDto>>.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
         }
         catch (Exception ex)
         {
@@ -180,7 +180,7 @@ public class RegistryRepository(
 
                 if (!response.IsSuccessStatusCode)
                 {
-                    return Result<RegistryRepositoryTagsDto>.Failure(RepositoryStatus.BadRequest, ResponseMessages.RegistryUpstreamError);
+                    return Result<RegistryRepositoryTagsDto>.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
                 }
 
                 await using var stream = await response.Content.ReadAsStreamAsync();
@@ -233,7 +233,7 @@ public class RegistryRepository(
         catch (HttpRequestException ex)
         {
             logger.LogWarning(ex, "Unable to reach upstream Docker Registry while fetching tags for {Repository}", repository);
-            return Result<RegistryRepositoryTagsDto>.Failure(RepositoryStatus.BadRequest, ResponseMessages.RegistryUpstreamError);
+            return Result<RegistryRepositoryTagsDto>.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
         }
         catch (Exception ex)
         {
@@ -285,7 +285,7 @@ public class RegistryRepository(
 
             if (!response.IsSuccessStatusCode)
             {
-                return Result<RegistryManifestDto>.Failure(RepositoryStatus.BadRequest, ResponseMessages.RegistryUpstreamError);
+                return Result<RegistryManifestDto>.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
             }
 
             var digest = response.Headers.TryGetValues("Docker-Content-Digest", out var digestValues)
@@ -385,7 +385,7 @@ public class RegistryRepository(
         catch (HttpRequestException ex)
         {
             logger.LogWarning(ex, "Unable to reach upstream Docker Registry while fetching manifest {Repository}:{Reference}", repository, reference);
-            return Result<RegistryManifestDto>.Failure(RepositoryStatus.BadRequest, ResponseMessages.RegistryUpstreamError);
+            return Result<RegistryManifestDto>.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
         }
         catch (Exception ex)
         {
@@ -442,7 +442,7 @@ public class RegistryRepository(
                     || !headRes.Headers.TryGetValues("Docker-Content-Digest", out var digestValues)
                     || string.IsNullOrWhiteSpace(digestValues.FirstOrDefault()))
                 {
-                    return Result.Failure(RepositoryStatus.BadRequest, ResponseMessages.RegistryUpstreamError);
+                    return Result.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
                 }
 
                 digest = digestValues.First();
@@ -457,7 +457,7 @@ public class RegistryRepository(
 
             if (!deleteRes.IsSuccessStatusCode)
             {
-                return Result.Failure(RepositoryStatus.BadRequest, ResponseMessages.RegistryUpstreamError);
+                return Result.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
             }
 
             context.AuditLogs.Add(new AuditLog(
@@ -474,7 +474,7 @@ public class RegistryRepository(
         catch (HttpRequestException ex)
         {
             logger.LogWarning(ex, "Unable to reach upstream Docker Registry while deleting manifest {Repository}:{Reference}", repository, reference);
-            return Result.Failure(RepositoryStatus.BadRequest, ResponseMessages.RegistryUpstreamError);
+            return Result.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
         }
         catch (Exception ex)
         {

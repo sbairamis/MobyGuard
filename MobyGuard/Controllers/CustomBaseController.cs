@@ -65,6 +65,7 @@ public abstract class CustomBaseController : ControllerBase
             RepositoryStatus.NotFound => StatusCodes.Status404NotFound,
             RepositoryStatus.Conflict => StatusCodes.Status409Conflict,
             RepositoryStatus.TooManyRequests => StatusCodes.Status429TooManyRequests,
+            RepositoryStatus.BadGateway => StatusCodes.Status502BadGateway,
             _ => StatusCodes.Status500InternalServerError
         };
 
