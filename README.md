@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/repositories.png" width="900" alt="MobyGuard Dashboard" style="border-radius: 8px;" />
+  <img src="docs/screenshots/v1.0.8/repositories.png" width="900" alt="MobyGuard Dashboard" style="border-radius: 8px;" />
 </p>
 
 ---
@@ -82,49 +82,49 @@ Organizations deploying private Docker registries typically face two limitations
 Browse catalog repositories, inspect multi-arch OCI and Docker v2 manifests, examine layers and container config settings, and track pending garbage collection:
 
 <p align="center">
-  <img src="docs/screenshots/repositories.png" alt="Images & Manifests" />
+  <img src="docs/screenshots/v1.0.8/repositories.png" alt="Images & Manifests" />
 </p>
 
 ### Retention Policies & Scheduler
 Configure namespace-scoped tag cleanup rules, protect release tags, preview changes with Dry Run, and automate runs Hourly, Daily, Weekly, or Monthly:
 
 <p align="center">
-  <img src="docs/screenshots/retention-policies.png" alt="Retention Policies" />
+  <img src="docs/screenshots/v1.0.8/retention-policies.png" alt="Retention Policies" />
 </p>
 
 ### Outbound Webhooks (Slack, Discord & Microsoft Teams)
 Route repository `push`, `delete`, and `retention` notifications to Slack, Discord, or Microsoft Teams with live delivery testing:
 
 <p align="center">
-  <img src="docs/screenshots/webhooks.png" alt="Outbound Webhooks" />
+  <img src="docs/screenshots/v1.0.8/webhooks.png" alt="Outbound Webhooks" />
 </p>
 
 ### Access Control Policies
 Manage per-user repository authorization rules with exact or wildcard (`namespace/*`) patterns, dropdown filtering, and granular Pull, Push, and Delete toggles:
 
 <p align="center">
-  <img src="docs/screenshots/policies.png" alt="Repository Access Control" />
+  <img src="docs/screenshots/v1.0.8/policies.png" alt="Repository Access Control" />
 </p>
 
 ### User & Service Account Management
 Provision human operator accounts with Root Admin protection and dedicated headless service accounts for CI/CD automation pipelines:
 
 <p align="center">
-  <img src="docs/screenshots/users.png" alt="User Management" />
+  <img src="docs/screenshots/v1.0.8/users.png" alt="User Management" />
 </p>
 
 ### Audit Trail
 Monitor token issuances, CLI image pushes/pulls/deletes, retention runs, and administrative actions with client IP addresses and timestamps:
 
 <p align="center">
-  <img src="docs/screenshots/audit-logs.png" alt="Audit Logs" />
+  <img src="docs/screenshots/v1.0.8/audit-logs.png" alt="Audit Logs" />
 </p>
 
 ### Authentication Interface
 Clean sign-in interface with ECDSA token authentication and initial admin onboarding:
 
 <p align="center">
-  <img src="docs/screenshots/login.png" alt="Sign In" />
+  <img src="docs/screenshots/v1.0.8/login.png" alt="Sign In" />
 </p>
 
 ---
