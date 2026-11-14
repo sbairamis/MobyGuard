@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using MobyGuard.Auth;
 using MobyGuard.Classes;
@@ -18,9 +19,13 @@ public class RegistryRepository(
     DatabaseContext context,
     RegistryTokenSigner tokenSigner,
     IHttpClientFactory httpClientFactory,
+    IMemoryCache cache,
     IOptions<RegistryTokenOptions> registryOptions,
     ILogger<RegistryRepository> logger)
 {
+    private const string CatalogCacheKey = "registry:catalog:repositories";
+    private static readonly TimeSpan CatalogCacheDuration = TimeSpan.FromSeconds(15);
+
     private static readonly string[] ManifestAcceptHeaders =
     [
         "application/vnd.oci.image.index.v1+json",
@@ -41,67 +46,73 @@ public class RegistryRepository(
                 return Result<List<RegistryRepositoryDto>>.Failure(RepositoryStatus.NotFound, ResponseMessages.UserNotFound);
             }
 
-            using var client = CreateRegistryClient("mobyguard-ui", [
-                new RegistryAccessEntryDto
-                {
-                    Type = "registry",
-                    Name = "catalog",
-                    Actions = ["*"]
-                }
-            ]);
-
-            var allRepoNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            string? nextUrl = "/v2/_catalog?n=100";
-            const int maxPages = 1000;
-            var pagesFetched = 0;
-
-            while (!string.IsNullOrEmpty(nextUrl) && pagesFetched < maxPages)
+            if (!cache.TryGetValue(CatalogCacheKey, out IReadOnlyList<string>? allRepoNames) || allRepoNames is null)
             {
-                pagesFetched++;
-                using var response = await client.GetAsync(nextUrl);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    logger.LogWarning("Upstream Docker Registry returned {StatusCode} on {Url}", response.StatusCode, nextUrl);
-                    return Result<List<RegistryRepositoryDto>>.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
-                }
-
-                await using var stream = await response.Content.ReadAsStreamAsync();
-                using var doc = await JsonDocument.ParseAsync(stream);
-
-                var pageCount = 0;
-                string? lastRepoInPage = null;
-
-                if (doc.RootElement.TryGetProperty("repositories", out var reposElement)
-                    && reposElement.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var item in reposElement.EnumerateArray())
+                using var client = CreateRegistryClient("mobyguard-ui", [
+                    new RegistryAccessEntryDto
                     {
-                        var repoName = item.GetString();
-                        if (string.IsNullOrWhiteSpace(repoName))
-                        {
-                            continue;
-                        }
+                        Type = "registry",
+                        Name = "catalog",
+                        Actions = ["*"]
+                    }
+                ]);
 
-                        allRepoNames.Add(repoName);
-                        lastRepoInPage = repoName;
-                        pageCount++;
+                var fetchedRepos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                string? nextUrl = "/v2/_catalog?n=100";
+                const int maxPages = 1000;
+                var pagesFetched = 0;
+
+                while (!string.IsNullOrEmpty(nextUrl) && pagesFetched < maxPages)
+                {
+                    pagesFetched++;
+                    using var response = await client.GetAsync(nextUrl);
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        logger.LogWarning("Upstream Docker Registry returned {StatusCode} on {Url}", response.StatusCode, nextUrl);
+                        return Result<List<RegistryRepositoryDto>>.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
+                    }
+
+                    await using var stream = await response.Content.ReadAsStreamAsync();
+                    using var doc = await JsonDocument.ParseAsync(stream);
+
+                    var pageCount = 0;
+                    string? lastRepoInPage = null;
+
+                    if (doc.RootElement.TryGetProperty("repositories", out var reposElement)
+                        && reposElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in reposElement.EnumerateArray())
+                        {
+                            var repoName = item.GetString();
+                            if (string.IsNullOrWhiteSpace(repoName))
+                            {
+                                continue;
+                            }
+
+                            fetchedRepos.Add(repoName);
+                            lastRepoInPage = repoName;
+                            pageCount++;
+                        }
+                    }
+
+                    var linkNext = ExtractNextLink(response.Headers);
+                    if (!string.IsNullOrEmpty(linkNext))
+                    {
+                        nextUrl = linkNext;
+                    }
+                    else if (pageCount >= 100 && !string.IsNullOrEmpty(lastRepoInPage))
+                    {
+                        nextUrl = $"/v2/_catalog?n=100&last={Uri.EscapeDataString(lastRepoInPage)}";
+                    }
+                    else
+                    {
+                        nextUrl = null;
                     }
                 }
 
-                var linkNext = ExtractNextLink(response.Headers);
-                if (!string.IsNullOrEmpty(linkNext))
-                {
-                    nextUrl = linkNext;
-                }
-                else if (pageCount >= 100 && !string.IsNullOrEmpty(lastRepoInPage))
-                {
-                    nextUrl = $"/v2/_catalog?n=100&last={Uri.EscapeDataString(lastRepoInPage)}";
-                }
-                else
-                {
-                    nextUrl = null;
-                }
+                allRepoNames = fetchedRepos.ToList();
+                cache.Set(CatalogCacheKey, allRepoNames, CatalogCacheDuration);
             }
 
             var repositories = new List<RegistryRepositoryDto>();
@@ -459,6 +470,8 @@ public class RegistryRepository(
             {
                 return Result.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
             }
+
+            cache.Remove(CatalogCacheKey);
 
             context.AuditLogs.Add(new AuditLog(
                 username: user.Username,

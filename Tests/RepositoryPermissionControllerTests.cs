@@ -185,4 +185,36 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
         Assert.Single(paged.Data);
         Assert.Equal("team-a/*", paged.Data[0].RepositoryPattern);
     }
+
+    [Fact]
+    public async Task GetMyPermissions_UserRole_ReturnsCallerPermissionsOnlyAndBlocksGlobalList()
+    {
+        var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+
+        await adminClient.PostAsJsonAsync(
+            "/api/RepositoryPermission",
+            new AddRepositoryPermissionDto { UserId = (int)PrimaryKeys.UserTypes.User, RepositoryPattern = "team-a/*", CanPull = true },
+            TestContext.Current.CancellationToken);
+
+        await adminClient.PostAsJsonAsync(
+            "/api/RepositoryPermission",
+            new AddRepositoryPermissionDto { UserId = (int)PrimaryKeys.UserTypes.Service, RepositoryPattern = "team-secret/*", CanPull = true },
+            TestContext.Current.CancellationToken);
+
+        var userClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.User);
+
+        var myPermsResponse = await userClient.GetAsync("/api/RepositoryPermission/me", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, myPermsResponse.StatusCode);
+
+        var myPerms = await myPermsResponse.Content.ReadFromJsonAsync<List<RepositoryPermissionDto>>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(myPerms);
+        Assert.Single(myPerms);
+        Assert.Equal("team-a/*", myPerms[0].RepositoryPattern);
+
+        var globalListResponse = await userClient.GetAsync("/api/RepositoryPermission", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, globalListResponse.StatusCode);
+
+        var otherUserPermsResponse = await userClient.GetAsync($"/api/RepositoryPermission/user/{(int)PrimaryKeys.UserTypes.Service}", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, otherUserPermsResponse.StatusCode);
+    }
 }

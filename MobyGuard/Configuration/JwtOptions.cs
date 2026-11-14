@@ -5,10 +5,10 @@ namespace MobyGuard.Configuration;
 public class JwtOptions
 {
     [Required]
-    public string Issuer { get; init; } = string.Empty;
+    public string Issuer { get; init; } = "mobyguard";
 
     [Required]
-    public string Audience { get; init; } = string.Empty;
+    public string Audience { get; init; } = "mobyguard";
 
     // Tokens are signed with HS256, which needs a key of at least 256 bits.
     [Required]

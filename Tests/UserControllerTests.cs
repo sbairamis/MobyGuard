@@ -295,4 +295,16 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
             new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
             TestContext.Current.CancellationToken)).StatusCode);
     }
+
+    [Fact]
+    public async Task NonAdminUser_CannotReadGlobalUsersOrAuditLogs()
+    {
+        var userClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.User);
+
+        Assert.Equal(HttpStatusCode.Forbidden, (await userClient.GetAsync("/api/User", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await userClient.GetAsync($"/api/User/{(int)PrimaryKeys.UserTypes.Admin}", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await userClient.GetAsync("/api/AuditLog", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await userClient.GetAsync("/api/AuditLog/filters", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await userClient.GetAsync("/api/User/me", TestContext.Current.CancellationToken)).StatusCode);
+    }
 }

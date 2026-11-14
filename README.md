@@ -189,6 +189,7 @@ To configure Docker Registry (or CNCF Distribution) to authenticate via MobyGuar
 
 ```yaml
 environment:
+  REGISTRY_STORAGE_DELETE_ENABLED: "true"
   REGISTRY_AUTH: token
   REGISTRY_AUTH_TOKEN_REALM: https://registry.example.com/api/Token
   REGISTRY_AUTH_TOKEN_SERVICE: registry

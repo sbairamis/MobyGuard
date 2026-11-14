@@ -11,7 +11,7 @@ namespace MobyGuard.Controllers;
 public class RepositoryPermissionController(RepositoryPermissionRepository repository) : CustomBaseController
 {
     [HttpGet]
-    [Authorize(Roles = $"{Roles.Admin}, {Roles.User}")]
+    [Authorize(Roles = Roles.Admin)]
     [ProducesResponseType(typeof(PagedResponse<List<RepositoryPermissionDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<PagedResponse<List<RepositoryPermissionDto>>>> GetAllPaged(
@@ -24,8 +24,26 @@ public class RepositoryPermissionController(RepositoryPermissionRepository repos
         return HandleResult(result);
     }
 
-    [HttpGet("{id}")]
+    [HttpGet("me")]
     [Authorize(Roles = $"{Roles.Admin}, {Roles.User}")]
+    [ProducesResponseType(typeof(List<RepositoryPermissionDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<List<RepositoryPermissionDto>>> GetMyPermissions()
+    {
+        if (!TryGetCallerId(out var callerId))
+        {
+            return Unauthorized();
+        }
+
+        var result = await repository.GetByUserId(callerId);
+
+        return HandleResult(result);
+    }
+
+    [HttpGet("{id}")]
+    [Authorize(Roles = Roles.Admin)]
     [ProducesResponseType(typeof(RepositoryPermissionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
@@ -37,7 +55,7 @@ public class RepositoryPermissionController(RepositoryPermissionRepository repos
     }
 
     [HttpGet("user/{userId}")]
-    [Authorize(Roles = $"{Roles.Admin}, {Roles.User}")]
+    [Authorize(Roles = Roles.Admin)]
     [ProducesResponseType(typeof(List<RepositoryPermissionDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]

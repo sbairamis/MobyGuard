@@ -37,7 +37,8 @@ RUN --mount=type=cache,id=nuget,sharing=locked,target=/root/.nuget/packages \
       --use-current-runtime \
       --self-contained false \
       --no-restore \
-      -o /app/out
+      -o /app/out \
+    && cp ./MobyGuard/appsettings.example.json /app/out/appsettings.json
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 

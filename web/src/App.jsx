@@ -120,21 +120,27 @@ export default function App() {
     )
   }
 
+  const isAdmin = user.userType === 'Admin'
+
   const navItems = [
     { section: 'Registry' },
     { path: '/', label: 'Images & Tags', icon: 'box' },
     { section: 'Access Control' },
     { path: '/permissions', label: 'Policies', icon: 'shield' },
-    { path: '/users', label: 'Users & Roles', icon: 'users' },
-    { path: '/audit', label: 'Audit Logs', icon: 'logs' },
+    ...(isAdmin
+      ? [
+          { path: '/users', label: 'Users & Roles', icon: 'users' },
+          { path: '/audit', label: 'Audit Logs', icon: 'logs' }
+        ]
+      : []),
     { section: 'Account' },
     { path: '/profile', label: 'My Account', icon: 'user' }
   ]
 
   let PageComponent = RegistryPage
   if (route.startsWith('/permissions')) PageComponent = PermissionsPage
-  else if (route.startsWith('/users')) PageComponent = UsersPage
-  else if (route.startsWith('/audit')) PageComponent = AuditLogsPage
+  else if (isAdmin && route.startsWith('/users')) PageComponent = UsersPage
+  else if (isAdmin && route.startsWith('/audit')) PageComponent = AuditLogsPage
   else if (route.startsWith('/profile')) PageComponent = ProfilePage
 
   const initials = (user.username || 'U').slice(0, 2).toUpperCase()

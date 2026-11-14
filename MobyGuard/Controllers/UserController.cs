@@ -98,7 +98,7 @@ public class UserController(UserRepository repository) : CustomBaseController
     }
 
     [HttpGet]
-    [Authorize(Roles = $"{Roles.Admin}, {Roles.User}")]
+    [Authorize(Roles = Roles.Admin)]
     [ProducesResponseType(typeof(PagedResponse<List<UserDto>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<PagedResponse<List<UserDto>>>> GetAllWithTypePaged([FromQuery] UserQueryFilterDto filter)
@@ -111,7 +111,7 @@ public class UserController(UserRepository repository) : CustomBaseController
     }
 
     [HttpGet("{id}")]
-    [Authorize(Roles = $"{Roles.Admin}, {Roles.User}")]
+    [Authorize(Roles = Roles.Admin)]
     [ProducesResponseType(typeof(UserDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]

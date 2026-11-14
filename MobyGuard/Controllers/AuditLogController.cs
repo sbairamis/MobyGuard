@@ -12,7 +12,7 @@ namespace MobyGuard.Controllers;
 public class AuditLogController(AuditLogRepository repository) : CustomBaseController
 {
     [HttpGet("filters")]
-    [Authorize(Roles = $"{Roles.Admin}, {Roles.User}")]
+    [Authorize(Roles = Roles.Admin)]
     [ProducesResponseType(typeof(AuditLogSearchFiltersDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<AuditLogSearchFiltersDto>> GetSearchFilters()
@@ -23,7 +23,7 @@ public class AuditLogController(AuditLogRepository repository) : CustomBaseContr
     }
 
     [HttpGet]
-    [Authorize(Roles = $"{Roles.Admin}, {Roles.User}")]
+    [Authorize(Roles = Roles.Admin)]
     [ProducesResponseType(typeof(PagedResponse<List<AuditLog>>), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<PagedResponse<List<AuditLog>>>> Search(
