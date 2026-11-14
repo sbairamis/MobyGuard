@@ -7,13 +7,12 @@ services:
       - "${API_PORT:-5090}:5090"
     volumes:
       - ${CERTS_DIR:-./certs}:/app/certs:ro
+      - sqlite-data:/app/data
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
-      ConnectionStrings__DefaultConnection: ${POSTGRES_CONN_STRING}
+      ConnectionStrings__DefaultConnection: ${SQLITE_CONN_STRING:-Data Source=/app/data/mobyguard.db}
       ConnectionStrings__RedisConnection: ${REDIS_CONN_STRING}
       RegistryTokenOptions__RegistryUrl: ${REGISTRY_URL}
       JwtOptions__SecurityKey: ${JWT_SECURITY_KEY}
@@ -26,26 +25,6 @@ services:
     networks:
       - default
       - registry-net
-
-  postgres:
-    image: postgres:17-alpine
-    restart: unless-stopped
-    container_name: mobyguard-postgres
-    ports:
-      - "${DB_PORT:-127.0.0.1:5432}:5432"
-    environment:
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_USER_PASS}
-      POSTGRES_DB: ${DB_NAME}
-    volumes:
-      - ./data/postgres:/var/lib/postgresql/data
-    healthcheck:
-      test:
-        - "CMD-SHELL"
-        - "pg_isready -U ${DB_USER} -d ${DB_NAME}"
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   redis:
     image: redis:8.10-alpine
@@ -65,6 +44,9 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+
+volumes:
+  sqlite-data:
 
 networks:
   registry-net:

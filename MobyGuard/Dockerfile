@@ -30,7 +30,7 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /app/certs \
+    && mkdir -p /app/certs /app/data \
     && chown -R app:app /app
 
 COPY --from=build --chown=app:app /app/out .

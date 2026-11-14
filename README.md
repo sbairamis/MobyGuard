@@ -10,10 +10,10 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&logoColor=white" alt=".NET 10" />
+  <img src="https://img.shields.io/badge/10.0-512BD4?logo=dotnet&logoColor=white" alt=".NET 10" />
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19" />
   <img src="https://img.shields.io/badge/Docker-Registry_v2%2Fv3-2496ED?logo=docker&logoColor=white" alt="Docker Registry" />
-  <img src="https://img.shields.io/badge/PostgreSQL-17-4169E1?logo=postgresql&logoColor=white" alt="PostgreSQL" />
+  <img src="https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&logoColor=white" alt="SQLite" />
   <img src="https://img.shields.io/badge/Redis-8-DC382D?logo=redis&logoColor=white" alt="Redis 8" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
 </p>
@@ -135,13 +135,13 @@ Clean sign-in interface with ECDSA token authentication and administrative onboa
                      │               │               │
                      ▼               ▼               ▼
                ┌───────────┐   ┌───────────┐   ┌───────────┐
-               │PostgreSQL │   │   Redis   │   │  Storage  │
+               │  SQLite   │   │   Redis   │   │  Storage  │
                │(Database) │   │  (Cache)  │   │  Volume   │
                └───────────┘   └───────────┘   └───────────┘
 ```
 
 * **Step 1 (Token Request)**: The Docker client requests an access token from MobyGuard (`/api/Token`) using HTTP Basic authentication.
-* **Step 2 (Token Issuance)**: MobyGuard evaluates the user's repository permissions in PostgreSQL and returns a cryptographically signed ECDSA `ES256` Bearer JWT.
+* **Step 2 (Token Issuance)**: MobyGuard evaluates the user's repository permissions in SQLite and returns a cryptographically signed ECDSA `ES256` Bearer JWT.
 * **Step 3 (Layer Streaming)**: The Docker client presents the Bearer token directly to Docker Registry (`/v2/`), which verifies the signature and streams image layer blobs directly to storage.
 * **Control Plane Isolation**: MobyGuard handles authentication, authorization policy evaluation, user management, and dashboard operations without bottlenecking image layer transfers.
 
@@ -212,13 +212,12 @@ services:
       - "${API_PORT:-5090}:5090"
     volumes:
       - ${CERTS_DIR:-./certs}:/app/certs:ro
+      - sqlite-data:/app/data
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
-      ConnectionStrings__DefaultConnection: ${POSTGRES_CONN_STRING}
+      ConnectionStrings__DefaultConnection: ${SQLITE_CONN_STRING:-Data Source=/app/data/mobyguard.db}
       ConnectionStrings__RedisConnection: ${REDIS_CONN_STRING}
       RegistryTokenOptions__RegistryUrl: ${REGISTRY_URL}
       JwtOptions__SecurityKey: ${JWT_SECURITY_KEY}
@@ -231,26 +230,6 @@ services:
     networks:
       - default
       - registry-net
-
-  postgres:
-    image: postgres:17-alpine
-    restart: unless-stopped
-    container_name: mobyguard-postgres
-    ports:
-      - "${DB_PORT:-127.0.0.1:5432}:5432"
-    environment:
-      POSTGRES_USER: ${DB_USER:-mobyguard}
-      POSTGRES_PASSWORD: ${DB_USER_PASS}
-      POSTGRES_DB: ${DB_NAME:-mobyguard}
-    volumes:
-      - ./data/postgres:/var/lib/postgresql/data
-    healthcheck:
-      test:
-        - "CMD-SHELL"
-        - "pg_isready -U ${DB_USER} -d ${DB_NAME}"
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   redis:
     image: redis:8.10-alpine
@@ -271,6 +250,9 @@ services:
       retries: 5
       start_period: 5s
 
+volumes:
+  sqlite-data:
+
 networks:
   registry-net:
     external: true
@@ -281,11 +263,8 @@ Create a `.env` file in the same directory (or copy from `.env.example`):
 
 ```bash
 cat << 'EOF' > .env
-# Database Credentials & Connection String
-DB_USER=mobyguard
-DB_USER_PASS=change_this_postgres_password
-DB_NAME=mobyguard
-POSTGRES_CONN_STRING=Host=postgres;Port=5432;Database=mobyguard;Username=mobyguard;Password=change_this_postgres_password;
+# Database Connection String (SQLite)
+SQLITE_CONN_STRING=Data Source=/app/data/mobyguard.db
 
 # Redis Credentials & Connection String
 REDIS_PASS=change_this_redis_password
@@ -299,7 +278,7 @@ JWT_SECURITY_KEY=generate_a_secure_random_32_character_security_key_here!
 EOF
 ```
 
-* **`POSTGRES_CONN_STRING`**: Connection string used by MobyGuard to connect to PostgreSQL.
+* **`SQLITE_CONN_STRING`**: Connection string used by MobyGuard for its embedded SQLite database (stored in the `sqlite-data` volume at `/app/data/mobyguard.db`).
 * **`REDIS_CONN_STRING`**: Connection string used by MobyGuard for session caching and rate-limiting.
 * **`JWT_SECURITY_KEY`**: Set a cryptographically secure random string with at least 32 characters (e.g., generated with `openssl rand -base64 32`).
 * **`REGISTRY_URL`**: Set the URL of your Docker Registry or CNCF Distribution instance.
@@ -377,10 +356,10 @@ For headless CI/CD systems (GitHub Actions, GitLab CI, Drone, Jenkins):
 
 * **Backend**: [.NET 10 (C#)](https://dotnet.microsoft.com/) — ASP.NET Core Web API with Microsoft OpenAPI.
 * **Frontend**: [React 19](https://react.dev/) + [Vite](https://vitejs.dev/) embedded in `wwwroot`.
-* **Database**: [PostgreSQL 17](https://www.postgresql.org/) for relational persistence and policy storage.
+* **Database**: [SQLite](https://www.sqlite.org/) for embedded relational persistence and policy storage.
 * **Cache**: [Redis 8](https://redis.io/) for JWT revocation, sessions, and rate-limiting.
 * **Token Signer**: Cryptographic ECDSA `ES256` token signing.
-* **Testing**: Integration testing with xUnit v3 and **Testcontainers**.
+* **Testing**: Integration testing with xUnit v3 and **Testcontainers** (Redis).
 
 ---
 
