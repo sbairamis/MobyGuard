@@ -23,7 +23,7 @@ public class UserRepository(
     IOptions<JwtOptions> jwtOptions,
     IUriService uriService,
     ILogger<UserRepository> logger,
-    RedisHelper redisHelper)
+    SessionService sessionService)
 {
     private readonly JwtOptions _jwtOptions = jwtOptions.Value;
 
@@ -111,7 +111,7 @@ public class UserRepository(
                 return Result<LoginResponseDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidCredentials);
             }
 
-            var isLockedUser = await redisHelper.IsLockedUser(user.Id, clientAddress);
+            var isLockedUser = sessionService.IsLockedUser(user.Id, clientAddress);
 
             if (isLockedUser)
             {
@@ -132,12 +132,12 @@ public class UserRepository(
 
             if (!correctPassword)
             {
-                await redisHelper.IncreaseUserLoginRetries(user.Id, clientAddress);
+                sessionService.IncreaseUserLoginRetries(user.Id, clientAddress);
 
                 return Result<LoginResponseDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidCredentials);
             }
 
-            await redisHelper.ClearUserLoginRetries(user.Id, clientAddress);
+            sessionService.ClearUserLoginRetries(user.Id, clientAddress);
 
             var (accessToken, refreshToken) = await IssueAuthTokens(user.Id, user.Username, user.UserType!.Type);
 
@@ -168,7 +168,7 @@ public class UserRepository(
     {
         try
         {
-            var (isValid, userId) = await redisHelper.ConsumeRefreshToken(refreshTokenDto.RefreshToken);
+            var (isValid, userId) = await sessionService.ConsumeRefreshToken(refreshTokenDto.RefreshToken);
 
             if (!isValid)
             {
@@ -181,19 +181,19 @@ public class UserRepository(
 
             if (user is null)
             {
-                await redisHelper.DeleteUserEntries(userId);
+                await sessionService.DeleteUserEntries(userId);
                 return Result<LoginResponseDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidRefreshToken);
             }
 
             if (!user.IsActive)
             {
-                await redisHelper.DeleteUserEntries(user.Id);
+                await sessionService.DeleteUserEntries(user.Id);
                 return Result<LoginResponseDto>.Failure(RepositoryStatus.Forbidden, ResponseMessages.UserIsInactive);
             }
 
             if (string.Equals(user.UserType?.Type, Roles.Service, StringComparison.OrdinalIgnoreCase))
             {
-                await redisHelper.DeleteUserEntries(user.Id);
+                await sessionService.DeleteUserEntries(user.Id);
                 return Result<LoginResponseDto>.Failure(RepositoryStatus.Forbidden, ResponseMessages.ServiceAccountCannotLogin);
             }
 
@@ -222,12 +222,12 @@ public class UserRepository(
         {
             if (!string.IsNullOrWhiteSpace(jti))
             {
-                await redisHelper.RevokeAccessToken(callerId, jti);
+                sessionService.RevokeAccessToken(callerId, jti);
             }
 
             if (!string.IsNullOrWhiteSpace(refreshTokenDto?.RefreshToken))
             {
-                await redisHelper.RevokeRefreshToken(refreshTokenDto.RefreshToken);
+                await sessionService.RevokeRefreshToken(refreshTokenDto.RefreshToken);
             }
 
             return Result.Success();
@@ -401,7 +401,7 @@ public class UserRepository(
 
             await context.SaveChangesAsync();
 
-            await redisHelper.ClearAllUserLoginRetries(callerId);
+            sessionService.ClearAllUserLoginRetries(callerId);
 
             return Result.Success();
         }
@@ -456,11 +456,11 @@ public class UserRepository(
 
             if (shouldInvalidateSessions)
             {
-                await redisHelper.DeleteUserEntries(id);
+                await sessionService.DeleteUserEntries(id);
             }
             else
             {
-                await redisHelper.ClearAllUserLoginRetries(id);
+                sessionService.ClearAllUserLoginRetries(id);
             }
 
             return Result.Success();
@@ -554,7 +554,7 @@ public class UserRepository(
 
             await context.SaveChangesAsync();
 
-            await redisHelper.DeleteUserEntries(id);
+            await sessionService.DeleteUserEntries(id);
 
             return Result.Success();
         }
@@ -578,11 +578,11 @@ public class UserRepository(
 
         if (invalidateSessions)
         {
-            await redisHelper.DeleteUserEntries(user.Id);
+            await sessionService.DeleteUserEntries(user.Id);
         }
         else
         {
-            await redisHelper.ClearAllUserLoginRetries(user.Id);
+            sessionService.ClearAllUserLoginRetries(user.Id);
         }
     }
 
@@ -613,9 +613,9 @@ public class UserRepository(
 
         var accessToken = new JwtSecurityTokenHandler().WriteToken(token);
 
-        await redisHelper.StoreActiveAccessToken(userId, jti, accessTokenExpiry);
+        sessionService.StoreActiveAccessToken(userId, jti, accessTokenExpiry);
 
-        var refreshToken = await redisHelper.CreateRefreshToken(userId, refreshTokenExpiry);
+        var refreshToken = await sessionService.CreateRefreshToken(userId, refreshTokenExpiry);
 
         return (accessToken, refreshToken);
     }

@@ -22,36 +22,26 @@ using MobyGuard.Database.Models;
 using MobyGuard.Enumerators;
 using MobyGuard.Helpers;
 using MobyGuard.Seeders;
-using StackExchange.Redis;
-using Testcontainers.Redis;
 
 namespace Tests;
 
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    private readonly RedisContainer _redisContainer;
-
     private readonly string _tempDirectory = Path.Combine(Path.GetTempPath(), "mobyguard-tests", Guid.NewGuid().ToString("N"));
     private string _dbPath = string.Empty;
     private string _certPath = string.Empty;
     private string _keyPath = string.Empty;
 
-    public CustomWebApplicationFactory()
+    public ValueTask InitializeAsync()
     {
-        _redisContainer = new RedisBuilder("redis:7-alpine")
-            .Build();
-    }
-
-    public async ValueTask InitializeAsync()
-    {
-        await _redisContainer.StartAsync();
-
         Directory.CreateDirectory(_tempDirectory);
         _dbPath = Path.Combine(_tempDirectory, "mobyguard-test.db");
         GenerateSelfSignedCert();
 
         // Start the app so Program.cs creates and migrates the SQLite database.
         _ = Server;
+
+        return ValueTask.CompletedTask;
     }
 
     private void GenerateSelfSignedCert()
@@ -69,18 +59,19 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     public async Task ResetDatabaseAsync()
     {
-        await _redisContainer.ExecAsync(["redis-cli", "FLUSHALL"]);
-
         using var scope = Services.CreateScope();
+
+        scope.ServiceProvider.GetRequiredService<SessionCacheService>().ClearAll();
 
         var dbContext = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
 
         await dbContext.Database.ExecuteSqlRawAsync("""
+            DELETE FROM "RefreshTokens";
             DELETE FROM "AuditLogs";
             DELETE FROM "RepositoryPermissions";
             DELETE FROM "Users";
             DELETE FROM "UserTypes";
-            UPDATE "sqlite_sequence" SET "seq" = 0 WHERE "name" IN ('AuditLogs', 'RepositoryPermissions', 'Users', 'UserTypes');
+            UPDATE "sqlite_sequence" SET "seq" = 0 WHERE "name" IN ('RefreshTokens', 'AuditLogs', 'RepositoryPermissions', 'Users', 'UserTypes');
             """);
 
         DbInitializer.Initialize(dbContext);
@@ -124,7 +115,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         {
             using var scope = Services.CreateScope();
             var jwtOptions = scope.ServiceProvider.GetRequiredService<IOptions<JwtOptions>>().Value;
-            var redisHelper = scope.ServiceProvider.GetRequiredService<RedisHelper>();
+            var sessionCache = scope.ServiceProvider.GetRequiredService<SessionCacheService>();
             var jti = Guid.NewGuid().ToString("N");
             var key = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(jwtOptions.SecurityKey));
             var token = new JwtSecurityToken(
@@ -140,7 +131,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 expires: DateTime.UtcNow.AddMinutes(15),
                 signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
 
-            await redisHelper.StoreActiveAccessToken((int)userType, jti, TimeSpan.FromMinutes(15));
+            sessionCache.StoreActiveAccessToken((int)userType, jti, TimeSpan.FromMinutes(15));
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", new JwtSecurityTokenHandler().WriteToken(token));
             return client;
         }
@@ -164,7 +155,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         builder.UseEnvironment("Testing");
 
         builder.UseSetting("ConnectionStrings:DefaultConnection", $"Data Source={_dbPath}");
-        builder.UseSetting("ConnectionStrings:RedisConnection", _redisContainer.GetConnectionString());
         builder.UseSetting("RegistryTokenOptions:CertificatePath", _certPath);
         builder.UseSetting("RegistryTokenOptions:PrivateKeyPath", _keyPath);
 
@@ -177,10 +167,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             {
                 options.UseSqlite($"Data Source={_dbPath}");
             });
-
-            services.RemoveAll(typeof(IConnectionMultiplexer));
-
-            services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(_redisContainer.GetConnectionString()));
         });
     }
 
@@ -189,8 +175,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         await base.DisposeAsync();
 
         SqliteConnection.ClearAllPools();
-
-        await _redisContainer.DisposeAsync();
 
         if (Directory.Exists(_tempDirectory))
         {

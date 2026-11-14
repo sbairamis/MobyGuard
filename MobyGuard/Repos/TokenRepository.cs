@@ -14,7 +14,7 @@ namespace MobyGuard.Repos;
 public class TokenRepository(
     DatabaseContext context,
     RegistryTokenSigner tokenSigner,
-    RedisHelper redisHelper,
+    SessionService sessionService,
     ILogger<TokenRepository> logger)
 {
     public async Task<Result<RegistryTokenResponseDto>> IssueToken(
@@ -39,7 +39,7 @@ public class TokenRepository(
                 return Result<RegistryTokenResponseDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidCredentials);
             }
 
-            if (await redisHelper.IsLockedUser(user.Id, clientAddress))
+            if (sessionService.IsLockedUser(user.Id, clientAddress))
             {
                 return Result<RegistryTokenResponseDto>.Failure(RepositoryStatus.TooManyRequests, ResponseMessages.TooManyRequests);
             }
@@ -51,12 +51,12 @@ public class TokenRepository(
 
             if (!PasswordHasher.Verify(password, user.Salt, user.Password))
             {
-                await redisHelper.IncreaseUserLoginRetries(user.Id, clientAddress);
+                sessionService.IncreaseUserLoginRetries(user.Id, clientAddress);
 
                 return Result<RegistryTokenResponseDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidCredentials);
             }
 
-            await redisHelper.ClearUserLoginRetries(user.Id, clientAddress);
+            sessionService.ClearUserLoginRetries(user.Id, clientAddress);
 
             var isAdmin = string.Equals(user.UserType?.Type, Roles.Admin, StringComparison.OrdinalIgnoreCase);
 

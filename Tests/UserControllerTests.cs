@@ -1,12 +1,15 @@
+using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using MobyGuard.Classes;
+using MobyGuard.Database.Context;
 using MobyGuard.Database.Dtos.UserDtos;
 using MobyGuard.Enumerators;
 using MobyGuard.Global;
-using StackExchange.Redis;
+using MobyGuard.Helpers;
 
 namespace Tests;
 
@@ -47,14 +50,24 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         Assert.False(string.IsNullOrEmpty(body.Token));
         Assert.False(string.IsNullOrEmpty(body.RefreshToken));
 
-        // Verify keys in Redis use com.mobeguard namespace prefix
+        // Verify active access token JTI is tracked in IMemoryCache and hashed refresh token is persisted in SQLite
         using var scope = _factory.Services.CreateScope();
-        var muxer = scope.ServiceProvider.GetRequiredService<IConnectionMultiplexer>();
-        var server = muxer.GetServers().First(s => !s.IsReplica);
-        var keys = server.Keys(pattern: "com.mobeguard:*").Select(k => (string)k!).ToList();
-        Assert.NotEmpty(keys);
-        Assert.Contains(keys, k => k.StartsWith("com.mobeguard:User:ActiveTokens:"));
-        Assert.Contains(keys, k => k.StartsWith("com.mobeguard:User:RefreshTokens:"));
+        var sessionCache = scope.ServiceProvider.GetRequiredService<SessionCacheService>();
+        var dbContext = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
+
+        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(body.Token);
+        var jti = jwt.Claims.First(c => c.Type == JwtRegisteredClaimNames.Jti).Value;
+        Assert.True(sessionCache.IsAccessTokenActive(body.Id, jti));
+
+        var secret = body.RefreshToken.Split('.', 2)[1];
+        var expectedHash = SessionService.HashSecret(secret);
+        var persisted = await dbContext.RefreshTokens.SingleOrDefaultAsync(
+            t => t.UserId == body.Id && t.TokenHash == expectedHash,
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(persisted);
+        Assert.NotEqual(body.RefreshToken, persisted.TokenHash);
+        Assert.True(persisted.ExpiresAt > DateTime.UtcNow);
     }
 
     [Fact]
@@ -198,5 +211,88 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
 
         var problem = await response.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(ResponseMessages.CannotDeleteYourself, problem!.Detail);
+    }
+
+    [Fact]
+    public async Task RefreshToken_WithExpiredToken_ReturnsUnauthorized()
+    {
+        var loginResponse = await LoginFromAsync("203.0.113.10", "User", "user");
+        var loginBody = await loginResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(loginBody);
+
+        var secret = loginBody.RefreshToken.Split('.', 2)[1];
+        var tokenHash = SessionService.HashSecret(secret);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
+            var expiredAt = DateTime.UtcNow.AddMinutes(-5);
+            await dbContext.RefreshTokens
+                .Where(t => t.TokenHash == tokenHash)
+                .ExecuteUpdateAsync(
+                    setters => setters.SetProperty(t => t.ExpiresAt, expiredAt),
+                    TestContext.Current.CancellationToken);
+        }
+
+        var refreshResponse = await _factory.CreateClient().PostAsJsonAsync(
+            "/api/User/refresh",
+            new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, refreshResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task RefreshToken_ConcurrentRequests_OnlyOneSucceeds()
+    {
+        var loginResponse = await LoginFromAsync("203.0.113.10", "User", "user");
+        var loginBody = await loginResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(loginBody);
+
+        var tasks = Enumerable.Range(0, 6)
+            .Select(_ => _factory.CreateClient().PostAsJsonAsync(
+                "/api/User/refresh",
+                new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
+                TestContext.Current.CancellationToken))
+            .ToArray();
+
+        var responses = await Task.WhenAll(tasks);
+
+        Assert.Single(responses, r => r.StatusCode == HttpStatusCode.OK);
+        Assert.Equal(5, responses.Count(r => r.StatusCode == HttpStatusCode.Unauthorized));
+    }
+
+    [Fact]
+    public async Task ProfileUpdate_ClearsLoginLockoutWithoutRevokingSession()
+    {
+        var loginResponse = await LoginFromAsync("203.0.113.10", "User", "user");
+        var loginBody = await loginResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(loginBody);
+
+        // Lock the account from another IP after login
+        for (var i = 0; i < Variables.LoginMaxRetries; i++)
+        {
+            await LoginFromAsync("198.51.100.77", "User", "wrongpassword");
+        }
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, (await LoginFromAsync("198.51.100.77", "User", "user")).StatusCode);
+
+        // Update profile (calls ClearAllUserLoginRetries, NOT DeleteUserEntries)
+        var userClient = _factory.CreateClient();
+        userClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginBody.Token);
+
+        var updateResponse = await userClient.PutAsJsonAsync(
+            "/api/User/me",
+            new UpdateMeDto { FirstName = "Updated", LastName = "User" },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, updateResponse.StatusCode);
+
+        // Existing access token, refresh token, and cleared lockout IP must all work
+        Assert.Equal(HttpStatusCode.OK, (await userClient.GetAsync("/api/User/me", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await LoginFromAsync("198.51.100.77", "User", "user")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _factory.CreateClient().PostAsJsonAsync(
+            "/api/User/refresh",
+            new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
+            TestContext.Current.CancellationToken)).StatusCode);
     }
 }

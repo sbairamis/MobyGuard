@@ -16,15 +16,11 @@ using MobyGuard.Helpers;
 using MobyGuard.Pagination;
 using MobyGuard.Repos;
 using MobyGuard.Seeders;
-using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
                        ?? throw new InvalidOperationException("Connection string 'DefaultConnection' could not be found.");
-
-var redisConnectionString = builder.Configuration.GetConnectionString("RedisConnection")
-                            ?? throw new InvalidOperationException("Connection string 'RedisConnection' could not be found.");
 
 builder.Services.AddValidatedOptions<JwtOptions>();
 builder.Services.AddValidatedOptions<RegistryTokenOptions>();
@@ -57,10 +53,11 @@ builder.Services.AddScoped<UserTypeRepository>();
 
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseHealthCheck>("Database")
-    .AddCheck<RedisHealthCheck>("Redis")
     .AddCheck<RegistryKeyHealthCheck>("RegistrySigningKey");
 
-builder.Services.AddScoped<RedisHelper>();
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<SessionCacheService>();
+builder.Services.AddScoped<SessionService>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
 
@@ -81,7 +78,7 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
 
         options.Events = new JwtBearerEvents
         {
-            OnTokenValidated = async context =>
+            OnTokenValidated = context =>
             {
                 var subClaim = context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value
                                ?? context.Principal?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
@@ -90,15 +87,17 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
                 if (!int.TryParse(subClaim, out var userId) || string.IsNullOrWhiteSpace(jtiClaim))
                 {
                     context.Fail("Invalid token claims.");
-                    return;
+                    return Task.CompletedTask;
                 }
 
-                var redisHelper = context.HttpContext.RequestServices.GetRequiredService<RedisHelper>();
+                var sessionCache = context.HttpContext.RequestServices.GetRequiredService<SessionCacheService>();
 
-                if (!await redisHelper.IsAccessTokenActive(userId, jtiClaim))
+                if (!sessionCache.IsAccessTokenActive(userId, jtiClaim))
                 {
                     context.Fail("Token has been revoked.");
                 }
+
+                return Task.CompletedTask;
             }
         };
     });
@@ -120,13 +119,6 @@ builder.Services.AddTransient<IUriService>(options =>
 
 builder.Services.AddDbContext<DatabaseContext>(options => options.UseSqlite(connectionString));
 
-builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
-{
-    var redisOptions = ConfigurationOptions.Parse(redisConnectionString);
-
-    return ConnectionMultiplexer.Connect(redisOptions);
-});
-
 builder.Services.AddProblemDetails();
 
 var app = builder.Build();
@@ -134,8 +126,6 @@ var app = builder.Build();
 app.Services.GetRequiredService<IStartupValidator>().Validate();
 
 app.Services.GetRequiredService<RegistryTokenSigner>();
-
-app.Services.GetRequiredService<IConnectionMultiplexer>();
 
 app.UseForwardedHeaders();
 
