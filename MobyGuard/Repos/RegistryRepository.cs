@@ -25,6 +25,19 @@ public class RegistryRepository(
 {
     private const string CatalogCacheKey = "registry:catalog:repositories";
     private static readonly TimeSpan CatalogCacheDuration = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan TagsCacheDuration = TimeSpan.FromSeconds(15);
+    private static readonly SemaphoreSlim CatalogLock = new(1, 1);
+
+    private static string GetTagsCacheKey(string repoName) => $"registry:tags:{repoName.ToLowerInvariant()}";
+
+    public void InvalidateRepositoryCache(string? repositoryName = null)
+    {
+        cache.Remove(CatalogCacheKey);
+        if (!string.IsNullOrWhiteSpace(repositoryName))
+        {
+            cache.Remove(GetTagsCacheKey(repositoryName.Trim().Trim('/')));
+        }
+    }
 
     private static readonly string[] ManifestAcceptHeaders =
     [
@@ -36,7 +49,10 @@ public class RegistryRepository(
 
     private readonly RegistryTokenOptions _options = registryOptions.Value;
 
-    public async Task<Result<List<RegistryRepositoryDto>>> GetRepositories(int callerId)
+    public async Task<Result<List<RegistryRepositoryDto>>> GetRepositories(
+        int callerId,
+        string? search = null,
+        bool forceRefresh = false)
     {
         try
         {
@@ -46,78 +62,101 @@ public class RegistryRepository(
                 return Result<List<RegistryRepositoryDto>>.Failure(RepositoryStatus.NotFound, ResponseMessages.UserNotFound);
             }
 
-            if (!cache.TryGetValue(CatalogCacheKey, out IReadOnlyList<string>? allRepoNames) || allRepoNames is null)
+            if (forceRefresh)
             {
-                using var client = CreateRegistryClient("mobyguard-ui", [
-                    new RegistryAccessEntryDto
-                    {
-                        Type = "registry",
-                        Name = "catalog",
-                        Actions = ["*"]
-                    }
-                ]);
-
-                var fetchedRepos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                string? nextUrl = "/v2/_catalog?n=100";
-                const int maxPages = 1000;
-                var pagesFetched = 0;
-
-                while (!string.IsNullOrEmpty(nextUrl) && pagesFetched < maxPages)
-                {
-                    pagesFetched++;
-                    using var response = await client.GetAsync(nextUrl);
-
-                    if (!response.IsSuccessStatusCode)
-                    {
-                        logger.LogWarning("Upstream Docker Registry returned {StatusCode} on {Url}", response.StatusCode, nextUrl);
-                        return Result<List<RegistryRepositoryDto>>.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
-                    }
-
-                    await using var stream = await response.Content.ReadAsStreamAsync();
-                    using var doc = await JsonDocument.ParseAsync(stream);
-
-                    var pageCount = 0;
-                    string? lastRepoInPage = null;
-
-                    if (doc.RootElement.TryGetProperty("repositories", out var reposElement)
-                        && reposElement.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var item in reposElement.EnumerateArray())
-                        {
-                            var repoName = item.GetString();
-                            if (string.IsNullOrWhiteSpace(repoName))
-                            {
-                                continue;
-                            }
-
-                            fetchedRepos.Add(repoName);
-                            lastRepoInPage = repoName;
-                            pageCount++;
-                        }
-                    }
-
-                    var linkNext = ExtractNextLink(response.Headers);
-                    if (!string.IsNullOrEmpty(linkNext))
-                    {
-                        nextUrl = linkNext;
-                    }
-                    else if (pageCount >= 100 && !string.IsNullOrEmpty(lastRepoInPage))
-                    {
-                        nextUrl = $"/v2/_catalog?n=100&last={Uri.EscapeDataString(lastRepoInPage)}";
-                    }
-                    else
-                    {
-                        nextUrl = null;
-                    }
-                }
-
-                allRepoNames = fetchedRepos.ToList();
-                cache.Set(CatalogCacheKey, allRepoNames, CatalogCacheDuration);
+                cache.Remove(CatalogCacheKey);
             }
 
+            if (!cache.TryGetValue(CatalogCacheKey, out IReadOnlyList<string>? allRepoNames) || allRepoNames is null)
+            {
+                await CatalogLock.WaitAsync();
+                try
+                {
+                    if (forceRefresh || !cache.TryGetValue(CatalogCacheKey, out allRepoNames) || allRepoNames is null)
+                    {
+                        using var client = CreateRegistryClient("mobyguard-ui", [
+                            new RegistryAccessEntryDto
+                            {
+                                Type = "registry",
+                                Name = "catalog",
+                                Actions = ["*"]
+                            }
+                        ]);
+
+                        var fetchedRepos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        string? nextUrl = "/v2/_catalog?n=100";
+                        const int maxPages = 1000;
+                        var pagesFetched = 0;
+
+                        while (!string.IsNullOrEmpty(nextUrl) && pagesFetched < maxPages)
+                        {
+                            pagesFetched++;
+                            using var response = await client.GetAsync(nextUrl);
+
+                            if (!response.IsSuccessStatusCode)
+                            {
+                                logger.LogWarning("Upstream Docker Registry returned {StatusCode} on {Url}", response.StatusCode, nextUrl);
+                                return Result<List<RegistryRepositoryDto>>.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
+                            }
+
+                            await using var stream = await response.Content.ReadAsStreamAsync();
+                            using var doc = await JsonDocument.ParseAsync(stream);
+
+                            var pageCount = 0;
+                            string? lastRepoInPage = null;
+
+                            if (doc.RootElement.TryGetProperty("repositories", out var reposElement)
+                                && reposElement.ValueKind == JsonValueKind.Array)
+                            {
+                                foreach (var item in reposElement.EnumerateArray())
+                                {
+                                    var repoName = item.GetString();
+                                    if (string.IsNullOrWhiteSpace(repoName))
+                                    {
+                                        continue;
+                                    }
+
+                                    fetchedRepos.Add(repoName);
+                                    lastRepoInPage = repoName;
+                                    pageCount++;
+                                }
+                            }
+
+                            var linkNext = ExtractNextLink(response.Headers);
+                            if (!string.IsNullOrEmpty(linkNext))
+                            {
+                                nextUrl = linkNext;
+                            }
+                            else if (pageCount >= 100 && !string.IsNullOrEmpty(lastRepoInPage))
+                            {
+                                nextUrl = $"/v2/_catalog?n=100&last={Uri.EscapeDataString(lastRepoInPage)}";
+                            }
+                            else
+                            {
+                                nextUrl = null;
+                            }
+                        }
+
+                        allRepoNames = fetchedRepos.ToList();
+                        cache.Set(CatalogCacheKey, allRepoNames, CatalogCacheDuration);
+                    }
+                }
+                finally
+                {
+                    CatalogLock.Release();
+                }
+            }
+
+            var searchFilter = search?.Trim();
             var repositories = new List<RegistryRepositoryDto>();
             foreach (var repoName in allRepoNames)
             {
+                if (!string.IsNullOrWhiteSpace(searchFilter)
+                    && !repoName.Contains(searchFilter, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 var (canPull, canPush, canDelete) = EvaluateUserRepoPermissions(repoName, isAdmin, permissions);
                 if (!canPull)
                 {
@@ -148,7 +187,7 @@ public class RegistryRepository(
         }
     }
 
-    public async Task<Result<RegistryRepositoryTagsDto>> GetTags(string repository, int callerId)
+    public async Task<Result<RegistryRepositoryTagsDto>> GetTags(string repository, int callerId, bool forceRefresh = false)
     {
         try
         {
@@ -165,73 +204,83 @@ public class RegistryRepository(
                 return Result<RegistryRepositoryTagsDto>.Failure(RepositoryStatus.Forbidden, ResponseMessages.RegistryRepositoryAccessDenied);
             }
 
-            using var client = CreateRegistryClient(user.Username, [
-                new RegistryAccessEntryDto
-                {
-                    Type = "repository",
-                    Name = repoName,
-                    Actions = ["pull"]
-                }
-            ]);
-
-            var allTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            string? nextTagsUrl = $"/v2/{repoName}/tags/list?n=100";
-            const int maxTagPages = 500;
-            var tagPagesFetched = 0;
-
-            while (!string.IsNullOrEmpty(nextTagsUrl) && tagPagesFetched < maxTagPages)
+            var tagsCacheKey = GetTagsCacheKey(repoName);
+            if (forceRefresh)
             {
-                tagPagesFetched++;
-                using var response = await client.GetAsync(nextTagsUrl);
+                cache.Remove(tagsCacheKey);
+            }
 
-                if (response.StatusCode == HttpStatusCode.NotFound)
-                {
-                    break;
-                }
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    return Result<RegistryRepositoryTagsDto>.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
-                }
-
-                await using var stream = await response.Content.ReadAsStreamAsync();
-                using var doc = await JsonDocument.ParseAsync(stream);
-
-                var pageCount = 0;
-                string? lastTagInPage = null;
-
-                if (doc.RootElement.TryGetProperty("tags", out var tagsElement)
-                    && tagsElement.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var item in tagsElement.EnumerateArray())
+            if (!cache.TryGetValue(tagsCacheKey, out List<string>? tags) || tags is null)
+            {
+                using var client = CreateRegistryClient(user.Username, [
+                    new RegistryAccessEntryDto
                     {
-                        var tag = item.GetString();
-                        if (!string.IsNullOrWhiteSpace(tag))
+                        Type = "repository",
+                        Name = repoName,
+                        Actions = ["pull"]
+                    }
+                ]);
+
+                var allTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                string? nextTagsUrl = $"/v2/{repoName}/tags/list?n=100";
+                const int maxTagPages = 500;
+                var tagPagesFetched = 0;
+
+                while (!string.IsNullOrEmpty(nextTagsUrl) && tagPagesFetched < maxTagPages)
+                {
+                    tagPagesFetched++;
+                    using var response = await client.GetAsync(nextTagsUrl);
+
+                    if (response.StatusCode == HttpStatusCode.NotFound)
+                    {
+                        break;
+                    }
+
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        return Result<RegistryRepositoryTagsDto>.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
+                    }
+
+                    await using var stream = await response.Content.ReadAsStreamAsync();
+                    using var doc = await JsonDocument.ParseAsync(stream);
+
+                    var pageCount = 0;
+                    string? lastTagInPage = null;
+
+                    if (doc.RootElement.TryGetProperty("tags", out var tagsElement)
+                        && tagsElement.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in tagsElement.EnumerateArray())
                         {
-                            allTags.Add(tag);
-                            lastTagInPage = tag;
-                            pageCount++;
+                            var tag = item.GetString();
+                            if (!string.IsNullOrWhiteSpace(tag))
+                            {
+                                allTags.Add(tag);
+                                lastTagInPage = tag;
+                                pageCount++;
+                            }
                         }
+                    }
+
+                    var linkNext = ExtractNextLink(response.Headers);
+                    if (!string.IsNullOrEmpty(linkNext))
+                    {
+                        nextTagsUrl = linkNext;
+                    }
+                    else if (pageCount >= 100 && !string.IsNullOrEmpty(lastTagInPage))
+                    {
+                        nextTagsUrl = $"/v2/{repoName}/tags/list?n=100&last={Uri.EscapeDataString(lastTagInPage)}";
+                    }
+                    else
+                    {
+                        nextTagsUrl = null;
                     }
                 }
 
-                var linkNext = ExtractNextLink(response.Headers);
-                if (!string.IsNullOrEmpty(linkNext))
-                {
-                    nextTagsUrl = linkNext;
-                }
-                else if (pageCount >= 100 && !string.IsNullOrEmpty(lastTagInPage))
-                {
-                    nextTagsUrl = $"/v2/{repoName}/tags/list?n=100&last={Uri.EscapeDataString(lastTagInPage)}";
-                }
-                else
-                {
-                    nextTagsUrl = null;
-                }
+                tags = allTags.ToList();
+                tags.Sort(StringComparer.OrdinalIgnoreCase);
+                cache.Set(tagsCacheKey, tags, TagsCacheDuration);
             }
-
-            var tags = allTags.ToList();
-            tags.Sort(StringComparer.OrdinalIgnoreCase);
 
             return Result<RegistryRepositoryTagsDto>.Success(new RegistryRepositoryTagsDto
             {
@@ -471,7 +520,7 @@ public class RegistryRepository(
                 return Result.Failure(RepositoryStatus.BadGateway, ResponseMessages.RegistryUpstreamError);
             }
 
-            cache.Remove(CatalogCacheKey);
+            InvalidateRepositoryCache(repoName);
 
             context.AuditLogs.Add(new AuditLog(
                 username: user.Username,

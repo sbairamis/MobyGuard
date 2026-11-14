@@ -66,7 +66,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         using var scope = Services.CreateScope();
 
         scope.ServiceProvider.GetRequiredService<SessionCacheService>().ClearAll();
-        scope.ServiceProvider.GetRequiredService< Microsoft.Extensions.Caching.Memory.IMemoryCache>().Remove("registry:catalog:repositories");
+        (scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>() as Microsoft.Extensions.Caching.Memory.MemoryCache)?.Compact(1.0);
 
         var dbContext = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
 

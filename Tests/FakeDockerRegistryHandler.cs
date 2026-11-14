@@ -11,13 +11,36 @@ public class FakeDockerRegistryHandler : HttpMessageHandler
     public const string LayerDigest = "sha256:2222222222222222222222222222222222222222222222222222222222222222";
 
     private readonly object _lock = new();
+    private HashSet<string> _repositories = new(StringComparer.OrdinalIgnoreCase) { "team-a/demo-app", "team-b/secret-app" };
     private HashSet<string> _demoTags = new(StringComparer.OrdinalIgnoreCase) { "v1.0.0" };
+
+    public int CatalogRequestCount { get; private set; }
+    public int TagsRequestCount { get; private set; }
 
     public void Reset()
     {
         lock (_lock)
         {
+            _repositories = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "team-a/demo-app", "team-b/secret-app" };
             _demoTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "v1.0.0" };
+            CatalogRequestCount = 0;
+            TagsRequestCount = 0;
+        }
+    }
+
+    public void AddRepository(string repoName)
+    {
+        lock (_lock)
+        {
+            _repositories.Add(repoName);
+        }
+    }
+
+    public void AddDemoTag(string tag)
+    {
+        lock (_lock)
+        {
+            _demoTags.Add(tag);
         }
     }
 
@@ -27,9 +50,17 @@ public class FakeDockerRegistryHandler : HttpMessageHandler
 
         if (request.Method == HttpMethod.Get && path == "/v2/_catalog")
         {
-            return Task.FromResult(JsonResponse(HttpStatusCode.OK, """
+            string[] repos;
+            lock (_lock)
+            {
+                CatalogRequestCount++;
+                repos = _repositories.ToArray();
+            }
+
+            var reposJson = string.Join(",", repos.Select(r => $"\"{r}\""));
+            return Task.FromResult(JsonResponse(HttpStatusCode.OK, $$"""
                 {
-                  "repositories": ["team-a/demo-app", "team-b/secret-app"]
+                  "repositories": [{{reposJson}}]
                 }
                 """));
         }
@@ -39,6 +70,7 @@ public class FakeDockerRegistryHandler : HttpMessageHandler
             string[] tags;
             lock (_lock)
             {
+                TagsRequestCount++;
                 tags = _demoTags.ToArray();
             }
 
