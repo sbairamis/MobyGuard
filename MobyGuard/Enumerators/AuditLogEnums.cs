@@ -9,7 +9,9 @@ public class AuditLogEnums
         Permission_Created = 3,
         Permission_Updated = 4,
         Permission_Deleted = 5,
-        Manifest_Deleted = 6
+        Manifest_Deleted = 6,
+        Manifest_Pushed = 7,
+        Manifest_Pulled = 8
     }
 
     public enum SearchBy

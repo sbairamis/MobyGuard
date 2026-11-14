@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -543,6 +545,137 @@ public class RegistryRepository(
             logger.LogError(ex, "An unexpected error occurred while deleting manifest {Repository}:{Reference}", repository, reference);
             return Result.Failure(RepositoryStatus.InternalServerError, ResponseMessages.InternalServerError);
         }
+    }
+
+    public async Task<Result<RegistryWebhookResultDto>> ProcessWebhookEvents(
+        RegistryEventEnvelopeDto? envelope,
+        string? providedSecret,
+        IPAddress? callerAddress)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(_options.WebhookSecret))
+            {
+                if (string.IsNullOrEmpty(providedSecret))
+                {
+                    return Result<RegistryWebhookResultDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidCredentials);
+                }
+
+                var expectedBytes = Encoding.UTF8.GetBytes(_options.WebhookSecret);
+                var actualBytes = Encoding.UTF8.GetBytes(providedSecret);
+                if (!CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes))
+                {
+                    return Result<RegistryWebhookResultDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidCredentials);
+                }
+            }
+
+            if (envelope?.Events is null || envelope.Events.Count == 0)
+            {
+                return Result<RegistryWebhookResultDto>.Success(new RegistryWebhookResultDto { ProcessedEvents = 0 });
+            }
+
+            var processed = 0;
+
+            foreach (var ev in envelope.Events)
+            {
+                if (ev.Target is null || string.IsNullOrWhiteSpace(ev.Target.Repository))
+                {
+                    continue;
+                }
+
+                var actorName = ev.Actor?.Name?.Trim();
+                if (string.Equals(actorName, "mobyguard-ui", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var mediaType = ev.Target.MediaType ?? string.Empty;
+                var isManifestEvent = mediaType.Contains("manifest", StringComparison.OrdinalIgnoreCase)
+                    || mediaType.Contains("index", StringComparison.OrdinalIgnoreCase)
+                    || !string.IsNullOrWhiteSpace(ev.Target.Tag);
+
+                if (!isManifestEvent)
+                {
+                    continue;
+                }
+
+                var action = ev.Action?.Trim().ToLowerInvariant() ?? string.Empty;
+                string? description = action switch
+                {
+                    "push" => nameof(AuditLogEnums.Description.Manifest_Pushed),
+                    "pull" => nameof(AuditLogEnums.Description.Manifest_Pulled),
+                    "delete" => nameof(AuditLogEnums.Description.Manifest_Deleted),
+                    _ => null
+                };
+
+                if (description is null)
+                {
+                    continue;
+                }
+
+                var repoName = ev.Target.Repository.Trim().Trim('/');
+                var reference = !string.IsNullOrWhiteSpace(ev.Target.Tag)
+                    ? ev.Target.Tag.Trim()
+                    : ev.Target.Digest?.Trim() ?? string.Empty;
+
+                if (action is "push" or "delete")
+                {
+                    InvalidateRepositoryCache(repoName);
+                }
+
+                var clientIp = ExtractClientIpFromAddr(ev.Request?.Addr) ?? callerAddress?.ToString() ?? string.Empty;
+
+                context.AuditLogs.Add(new AuditLog(
+                    username: !string.IsNullOrWhiteSpace(actorName) ? actorName : "anonymous",
+                    repository: !string.IsNullOrWhiteSpace(reference) ? $"{repoName}:{reference}" : repoName,
+                    actions: action,
+                    description: description,
+                    clientIp: clientIp));
+
+                processed++;
+            }
+
+            if (processed > 0)
+            {
+                await context.SaveChangesAsync();
+            }
+
+            return Result<RegistryWebhookResultDto>.Success(new RegistryWebhookResultDto
+            {
+                ProcessedEvents = processed
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "An unexpected error occurred while processing registry webhook events");
+            return Result<RegistryWebhookResultDto>.Failure(RepositoryStatus.InternalServerError, ResponseMessages.InternalServerError);
+        }
+    }
+
+    private static string? ExtractClientIpFromAddr(string? addr)
+    {
+        if (string.IsNullOrWhiteSpace(addr))
+        {
+            return null;
+        }
+
+        var trimmed = addr.Trim();
+        if (trimmed.StartsWith('['))
+        {
+            var closeBracket = trimmed.IndexOf(']');
+            if (closeBracket > 1)
+            {
+                return trimmed[1..closeBracket];
+            }
+        }
+
+        var lastColon = trimmed.LastIndexOf(':');
+        if (lastColon > 0 && trimmed.IndexOf(':') == lastColon)
+        {
+            return trimmed[..lastColon];
+        }
+
+        return trimmed;
     }
 
     private async Task PopulateConfigDetailsAsync(HttpClient client, string repoName, string configDigest, RegistryManifestDto dto)

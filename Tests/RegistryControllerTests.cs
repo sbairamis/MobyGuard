@@ -198,4 +198,115 @@ public class RegistryControllerTests : IClassFixture<CustomWebApplicationFactory
         Assert.Equal(["v1.0.0", "v2.0.0"], refreshedTags!.Tags);
         Assert.Equal(2, _factory.RegistryHandler.TagsRequestCount);
     }
+
+    [Fact]
+    public async Task ReceiveWebhookEvents_RecordsPushAndPullAuditLogs_IgnoresBlobsAndUiActor_AndInvalidatesCache()
+    {
+        var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+
+        // Warm the tags cache
+        var initialTags = await adminClient.GetFromJsonAsync<RegistryRepositoryTagsDto>(
+            "/api/v1/Registry/tags?repositoryName=team-a/demo-app",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(["v1.0.0"], initialTags!.Tags);
+
+        // Simulate upstream push of v3.0.0 and send Docker Registry notification envelope
+        _factory.RegistryHandler.AddDemoTag("v3.0.0");
+
+        var anonymousClient = _factory.CreateClient();
+        var envelope = new RegistryEventEnvelopeDto
+        {
+            Events =
+            [
+                // 1. Layer blob push (should be ignored)
+                new RegistryEventItemDto
+                {
+                    Id = "evt-blob-1",
+                    Action = "push",
+                    Target = new RegistryEventTargetDto
+                    {
+                        MediaType = "application/vnd.docker.image.rootfs.diff.tar.gzip",
+                        Repository = "team-a/demo-app",
+                        Digest = FakeDockerRegistryHandler.LayerDigest
+                    },
+                    Actor = new RegistryEventActorDto { Name = "ci-bot" }
+                },
+                // 2. Internal mobyguard-ui pull (should be ignored)
+                new RegistryEventItemDto
+                {
+                    Id = "evt-ui-1",
+                    Action = "pull",
+                    Target = new RegistryEventTargetDto
+                    {
+                        MediaType = "application/vnd.docker.distribution.manifest.v2+json",
+                        Repository = "team-a/demo-app",
+                        Tag = "v1.0.0"
+                    },
+                    Actor = new RegistryEventActorDto { Name = "mobyguard-ui" }
+                },
+                // 3. Real manifest push by ci-bot
+                new RegistryEventItemDto
+                {
+                    Id = "evt-push-1",
+                    Action = "push",
+                    Target = new RegistryEventTargetDto
+                    {
+                        MediaType = "application/vnd.docker.distribution.manifest.v2+json",
+                        Repository = "team-a/demo-app",
+                        Tag = "v3.0.0",
+                        Digest = FakeDockerRegistryHandler.DemoDigest
+                    },
+                    Request = new RegistryEventRequestDto { Addr = "198.51.100.42:54321" },
+                    Actor = new RegistryEventActorDto { Name = "ci-bot" }
+                },
+                // 4. Real manifest pull by alice over IPv6
+                new RegistryEventItemDto
+                {
+                    Id = "evt-pull-1",
+                    Action = "pull",
+                    Target = new RegistryEventTargetDto
+                    {
+                        MediaType = "application/vnd.oci.image.manifest.v1+json",
+                        Repository = "team-a/demo-app",
+                        Tag = "v3.0.0"
+                    },
+                    Request = new RegistryEventRequestDto { Addr = "[2001:db8::9]:41200" },
+                    Actor = new RegistryEventActorDto { Name = "alice" }
+                }
+            ]
+        };
+
+        var webhookRes = await anonymousClient.PostAsJsonAsync(
+            "/api/v1/Registry/events",
+            envelope,
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, webhookRes.StatusCode);
+
+        var webhookBody = await webhookRes.Content.ReadFromJsonAsync<RegistryWebhookResultDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(webhookBody);
+        Assert.Equal(2, webhookBody.ProcessedEvents);
+
+        // Cache was automatically invalidated by the push webhook, so GetTags returns v3.0.0 immediately without ?refresh=true
+        var tagsAfterPush = await adminClient.GetFromJsonAsync<RegistryRepositoryTagsDto>(
+            "/api/v1/Registry/tags?repositoryName=team-a/demo-app",
+            TestContext.Current.CancellationToken);
+        Assert.Contains("v3.0.0", tagsAfterPush!.Tags);
+
+        var auditLogs = await adminClient.GetFromJsonAsync<PagedResponse<List<AuditLog>>>(
+            "/api/v1/AuditLog?PageNumber=1&PageSize=50",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(auditLogs);
+        Assert.Contains(auditLogs.Data, l =>
+            l.Username == "ci-bot"
+            && l.Repository == "team-a/demo-app:v3.0.0"
+            && l.Actions == "push"
+            && l.Description == nameof(AuditLogEnums.Description.Manifest_Pushed)
+            && l.ClientIp == "198.51.100.42");
+        Assert.Contains(auditLogs.Data, l =>
+            l.Username == "alice"
+            && l.Repository == "team-a/demo-app:v3.0.0"
+            && l.Actions == "pull"
+            && l.Description == nameof(AuditLogEnums.Description.Manifest_Pulled)
+            && l.ClientIp == "2001:db8::9");
+    }
 }

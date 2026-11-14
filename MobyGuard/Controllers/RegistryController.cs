@@ -89,4 +89,36 @@ public class RegistryController(RegistryRepository repository) : CustomBaseContr
 
         return HandleResult(result);
     }
+
+    [AllowAnonymous]
+    [HttpPost("events")]
+    [ProducesResponseType(typeof(RegistryWebhookResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<RegistryWebhookResultDto>> ReceiveWebhookEvents(
+        [FromBody] RegistryEventEnvelopeDto? envelope)
+    {
+        string? providedSecret = null;
+
+        if (Request.Headers.TryGetValue("X-Registry-Webhook-Secret", out var customSecret)
+            && !string.IsNullOrWhiteSpace(customSecret))
+        {
+            providedSecret = customSecret.ToString().Trim();
+        }
+        else if (Request.Headers.TryGetValue("Authorization", out var authHeader))
+        {
+            var raw = authHeader.ToString().Trim();
+            if (raw.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            {
+                providedSecret = raw["Bearer ".Length..].Trim();
+            }
+        }
+
+        var result = await repository.ProcessWebhookEvents(
+            envelope,
+            providedSecret,
+            HttpContext.Connection.RemoteIpAddress);
+
+        return HandleResult(result);
+    }
 }
