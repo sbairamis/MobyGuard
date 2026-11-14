@@ -98,3 +98,13 @@ public class RegistryWebhookResultDto
 {
     public int ProcessedEvents { get; set; }
 }
+
+public class RegistryGarbageCollectionStatusDto
+{
+    public int PendingDeletedManifestsCount { get; set; }
+    public DateTime? LastDeletedAt { get; set; }
+    public DateTime? LastAcknowledgedAt { get; set; }
+    public string? LastAcknowledgedBy { get; set; }
+    public string RecommendedCommand { get; set; } =
+        "docker exec registry bin/registry garbage-collect /etc/docker/registry/config.yml --delete-untagged";
+}

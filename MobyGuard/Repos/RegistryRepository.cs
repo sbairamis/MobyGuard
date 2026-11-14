@@ -685,6 +685,76 @@ public class RegistryRepository(
         }
     }
 
+    public async Task<Result<RegistryGarbageCollectionStatusDto>> GetGarbageCollectionStatus()
+    {
+        try
+        {
+            var gcAckDescription = nameof(AuditLogEnums.Description.Garbage_Collection_Acknowledged);
+            var deletedDescription = nameof(AuditLogEnums.Description.Manifest_Deleted);
+
+            var lastAck = await context.AuditLogs
+                .AsNoTracking()
+                .Where(l => l.Description == gcAckDescription)
+                .OrderByDescending(l => l.Id)
+                .FirstOrDefaultAsync();
+
+            var deletedQuery = context.AuditLogs
+                .AsNoTracking()
+                .Where(l => l.Description == deletedDescription);
+
+            if (lastAck is not null)
+            {
+                deletedQuery = deletedQuery.Where(l => l.Id > lastAck.Id);
+            }
+
+            var pendingCount = await deletedQuery.CountAsync();
+            var lastDeleted = pendingCount > 0
+                ? await deletedQuery.OrderByDescending(l => l.Id).Select(l => (DateTime?)l.CreatedAt).FirstOrDefaultAsync()
+                : null;
+
+            return Result<RegistryGarbageCollectionStatusDto>.Success(new RegistryGarbageCollectionStatusDto
+            {
+                PendingDeletedManifestsCount = pendingCount,
+                LastDeletedAt = lastDeleted,
+                LastAcknowledgedAt = lastAck?.CreatedAt,
+                LastAcknowledgedBy = lastAck?.Username
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "An unexpected error occurred while reading garbage collection status");
+            return Result<RegistryGarbageCollectionStatusDto>.Failure(RepositoryStatus.InternalServerError, ResponseMessages.InternalServerError);
+        }
+    }
+
+    public async Task<Result<RegistryGarbageCollectionStatusDto>> AcknowledgeGarbageCollection(int callerId, IPAddress? clientAddress)
+    {
+        try
+        {
+            var user = await context.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == callerId);
+            if (user is null)
+            {
+                return Result<RegistryGarbageCollectionStatusDto>.Failure(RepositoryStatus.NotFound, ResponseMessages.UserNotFound);
+            }
+
+            context.AuditLogs.Add(new AuditLog(
+                username: user.Username,
+                repository: "registry",
+                actions: "gc",
+                description: nameof(AuditLogEnums.Description.Garbage_Collection_Acknowledged),
+                clientIp: clientAddress?.ToString() ?? string.Empty));
+
+            await context.SaveChangesAsync();
+
+            return await GetGarbageCollectionStatus();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "An unexpected error occurred while acknowledging garbage collection");
+            return Result<RegistryGarbageCollectionStatusDto>.Failure(RepositoryStatus.InternalServerError, ResponseMessages.InternalServerError);
+        }
+    }
+
     private static string? ExtractClientIpFromAddr(string? addr)
     {
         if (string.IsNullOrWhiteSpace(addr))

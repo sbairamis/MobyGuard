@@ -122,4 +122,34 @@ public class RegistryController(RegistryRepository repository) : CustomBaseContr
 
         return HandleResult(result);
     }
+
+    [HttpGet("garbage-collection")]
+    [ProducesResponseType(typeof(RegistryGarbageCollectionStatusDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<RegistryGarbageCollectionStatusDto>> GetGarbageCollectionStatus()
+    {
+        var result = await repository.GetGarbageCollectionStatus();
+
+        return HandleResult(result);
+    }
+
+    [HttpPost("garbage-collection/acknowledge")]
+    [Authorize(Roles = Roles.Admin)]
+    [ProducesResponseType(typeof(RegistryGarbageCollectionStatusDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<RegistryGarbageCollectionStatusDto>> AcknowledgeGarbageCollection()
+    {
+        if (!TryGetCallerId(out var callerId))
+        {
+            return Unauthorized();
+        }
+
+        var result = await repository.AcknowledgeGarbageCollection(
+            callerId,
+            HttpContext.Connection.RemoteIpAddress);
+
+        return HandleResult(result);
+    }
 }

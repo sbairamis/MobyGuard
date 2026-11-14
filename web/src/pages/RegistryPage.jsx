@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, formatBytes, formatDate } from '../api'
 import Icon from '../components/Icon'
 
-export default function RegistryPage({ notify }) {
+export default function RegistryPage({ user, notify }) {
   const [repos, setRepos] = useState([])
   const [repoSearch, setRepoSearch] = useState('')
   const [selectedRepo, setSelectedRepo] = useState(null)
@@ -10,6 +10,7 @@ export default function RegistryPage({ notify }) {
   const [tagsData, setTagsData] = useState(null)
   const [selectedRef, setSelectedRef] = useState(null)
   const [manifest, setManifest] = useState(null)
+  const [gcStatus, setGcStatus] = useState(null)
 
   const [loadingRepos, setLoadingRepos] = useState(true)
   const [loadingTags, setLoadingTags] = useState(false)
@@ -17,6 +18,24 @@ export default function RegistryPage({ notify }) {
   const [repoError, setRepoError] = useState('')
 
   const host = window.location.host || 'registry.yourcompany.com'
+  const isAdmin = user?.userType === 'Admin'
+
+  async function fetchGcStatus() {
+    try {
+      const status = await api.get('/api/v1/Registry/garbage-collection')
+      setGcStatus(status)
+    } catch {}
+  }
+
+  async function handleAcknowledgeGc() {
+    try {
+      const status = await api.post('/api/v1/Registry/garbage-collection/acknowledge', {})
+      setGcStatus(status)
+      notify('Garbage collection marked as completed', 'ok')
+    } catch (err) {
+      notify(err.message, 'err')
+    }
+  }
 
   async function fetchRepositories(forceRefresh = false) {
     setLoadingRepos(true)
@@ -87,7 +106,7 @@ export default function RegistryPage({ notify }) {
         `/api/v1/Registry/manifest?repositoryName=${encodeURIComponent(selectedRepo.name)}&reference=${encodeURIComponent(reference)}`
       )
       notify(`Deleted ${selectedRepo.name}:${reference}`, 'ok')
-      await selectRepository(selectedRepo)
+      await Promise.all([selectRepository(selectedRepo, true), fetchGcStatus()])
     } catch (err) {
       notify(err.message, 'err')
     }
@@ -100,6 +119,7 @@ export default function RegistryPage({ notify }) {
 
   useEffect(() => {
     fetchRepositories()
+    fetchGcStatus()
   }, [])
 
   const filteredRepos = repos.filter((r) =>
@@ -126,6 +146,32 @@ export default function RegistryPage({ notify }) {
               <p className="muted" style={{ margin: '4px 0 0', fontSize: 13 }}>{repoError}</p>
             </div>
             <button className="sm" onClick={() => fetchRepositories(true)}>Retry</button>
+          </div>
+        </div>
+      )}
+
+      {gcStatus?.pendingDeletedManifestsCount > 0 && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <b>Storage Garbage Collection Pending ({gcStatus.pendingDeletedManifestsCount} deleted manifest{gcStatus.pendingDeletedManifestsCount === 1 ? '' : 's'})</b>
+              <p className="muted" style={{ margin: '4px 0 0', fontSize: 13 }}>
+                Deleting tags unlinks manifest references in Docker Registry. Run garbage collection on the registry container to reclaim disk blocks.
+              </p>
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              <button
+                className="sm"
+                onClick={() => copyText(gcStatus.recommendedCommand, 'GC command')}
+              >
+                <Icon name="copy" size={13} /> Copy GC Command
+              </button>
+              {isAdmin && (
+                <button className="primary sm" onClick={handleAcknowledgeGc}>
+                  Mark GC Completed
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
