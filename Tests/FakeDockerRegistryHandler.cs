@@ -18,6 +18,7 @@ public class FakeDockerRegistryHandler : HttpMessageHandler
     private readonly object _lock = new();
     private HashSet<string> _repositories = new(StringComparer.OrdinalIgnoreCase) { "team-a/demo-app", "team-b/secret-app" };
     private HashSet<string> _demoTags = new(StringComparer.OrdinalIgnoreCase) { "v1.0.0" };
+    private Dictionary<string, (string Digest, string ConfigDigest, string CreatedIso)> _customDemoTagMeta = new(StringComparer.OrdinalIgnoreCase);
 
     public int CatalogRequestCount { get; private set; }
     public int TagsRequestCount { get; private set; }
@@ -28,6 +29,7 @@ public class FakeDockerRegistryHandler : HttpMessageHandler
         {
             _repositories = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "team-a/demo-app", "team-b/secret-app" };
             _demoTags = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "v1.0.0" };
+            _customDemoTagMeta = new Dictionary<string, (string Digest, string ConfigDigest, string CreatedIso)>(StringComparer.OrdinalIgnoreCase);
             CatalogRequestCount = 0;
             TagsRequestCount = 0;
         }
@@ -46,6 +48,16 @@ public class FakeDockerRegistryHandler : HttpMessageHandler
         lock (_lock)
         {
             _demoTags.Add(tag);
+        }
+    }
+
+    public void SetDemoTagManifest(string tag, string digest, string createdIso)
+    {
+        lock (_lock)
+        {
+            _demoTags.Add(tag);
+            var cfgDigest = $"sha256:cfg-{tag.GetHashCode():x8}";
+            _customDemoTagMeta[tag] = (digest, cfgDigest, createdIso);
         }
     }
 
@@ -230,17 +242,90 @@ public class FakeDockerRegistryHandler : HttpMessageHandler
                 """));
         }
 
-        if (request.Method == HttpMethod.Delete && path == $"/v2/team-a/demo-app/manifests/{DemoDigest}")
+        if (request.Method == HttpMethod.Delete && path.StartsWith("/v2/team-a/demo-app/manifests/", StringComparison.OrdinalIgnoreCase))
         {
+            var targetDigest = path["/v2/team-a/demo-app/manifests/".Length..];
             lock (_lock)
             {
-                if (!_demoTags.Remove("v1.0.0"))
+                var removedAny = false;
+                if (string.Equals(targetDigest, DemoDigest, StringComparison.OrdinalIgnoreCase))
+                {
+                    removedAny |= _demoTags.Remove("v1.0.0");
+                }
+
+                var matchingCustomTags = _customDemoTagMeta
+                    .Where(kv => string.Equals(kv.Value.Digest, targetDigest, StringComparison.OrdinalIgnoreCase))
+                    .Select(kv => kv.Key)
+                    .ToList();
+
+                foreach (var tag in matchingCustomTags)
+                {
+                    removedAny |= _demoTags.Remove(tag);
+                    _customDemoTagMeta.Remove(tag);
+                }
+
+                if (!removedAny)
                 {
                     return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
                 }
             }
 
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Accepted));
+        }
+
+        if ((request.Method == HttpMethod.Get || request.Method == HttpMethod.Head)
+            && path.StartsWith("/v2/team-a/demo-app/manifests/", StringComparison.OrdinalIgnoreCase))
+        {
+            var refName = path["/v2/team-a/demo-app/manifests/".Length..];
+            lock (_lock)
+            {
+                if (_customDemoTagMeta.TryGetValue(refName, out var meta) && _demoTags.Contains(refName))
+                {
+                    var response = JsonResponse(
+                        HttpStatusCode.OK,
+                        $$"""
+                        {
+                          "schemaVersion": 2,
+                          "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
+                          "config": {
+                            "mediaType": "application/vnd.docker.container.image.v1+json",
+                            "size": 1024,
+                            "digest": "{{meta.ConfigDigest}}"
+                          },
+                          "layers": [
+                            {
+                              "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
+                              "size": 4096,
+                              "digest": "{{LayerDigest}}"
+                            }
+                          ]
+                        }
+                        """,
+                        "application/vnd.docker.distribution.manifest.v2+json");
+
+                    response.Headers.TryAddWithoutValidation("Docker-Content-Digest", meta.Digest);
+                    return Task.FromResult(response);
+                }
+            }
+        }
+
+        if (request.Method == HttpMethod.Get && path.StartsWith("/v2/team-a/demo-app/blobs/sha256:cfg-", StringComparison.OrdinalIgnoreCase))
+        {
+            var cfgDigest = path["/v2/team-a/demo-app/blobs/".Length..];
+            lock (_lock)
+            {
+                var found = _customDemoTagMeta.Values.FirstOrDefault(v => string.Equals(v.ConfigDigest, cfgDigest, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrEmpty(found.CreatedIso))
+                {
+                    return Task.FromResult(JsonResponse(HttpStatusCode.OK, $$"""
+                        {
+                          "architecture": "amd64",
+                          "os": "linux",
+                          "created": "{{found.CreatedIso}}"
+                        }
+                        """));
+                }
+            }
         }
 
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));

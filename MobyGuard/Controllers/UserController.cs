@@ -182,10 +182,16 @@ public class UserController(UserRepository repository) : CustomBaseController
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult> ResetPassword([FromRoute] int id, [FromBody] ResetPasswordDto resetPasswordDto)
     {
-        var result = await repository.ResetPassword(id, resetPasswordDto);
+        if (!TryGetCallerId(out var callerId))
+        {
+            return Unauthorized();
+        }
+
+        var result = await repository.ResetPassword(id, resetPasswordDto, callerId);
 
         return HandleResult(result);
     }

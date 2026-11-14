@@ -10,8 +10,8 @@ export default function PermissionsPage({ user, notify }) {
   const [pageNumber, setPageNumber] = useState(1)
   const [pageSize] = useState(15)
 
-  const [filterUsername, setFilterUsername] = useState('')
-  const [filterPattern, setFilterPattern] = useState('')
+  const [searchBy, setSearchBy] = useState('0')
+  const [filterValue, setFilterValue] = useState('')
   const [loading, setLoading] = useState(true)
 
   const [usersList, setUsersList] = useState([])
@@ -25,7 +25,7 @@ export default function PermissionsPage({ user, notify }) {
   const [formDelete, setFormDelete] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  async function loadPermissions(page = pageNumber) {
+  async function loadPermissions(page = pageNumber, overrideSearchBy = searchBy, overrideValue = filterValue) {
     setLoading(true)
     try {
       if (!isAdmin) {
@@ -37,8 +37,12 @@ export default function PermissionsPage({ user, notify }) {
           PageNumber: String(page),
           PageSize: String(pageSize)
         })
-        if (filterUsername.trim()) params.set('Username', filterUsername.trim())
-        if (filterPattern.trim()) params.set('RepositoryPattern', filterPattern.trim())
+        const trimmed = overrideValue.trim()
+        if (overrideSearchBy === 'username' && trimmed) {
+          params.set('Username', trimmed)
+        } else if (overrideSearchBy === 'pattern' && trimmed) {
+          params.set('RepositoryPattern', trimmed)
+        }
 
         const res = await api.get(`/api/v1/RepositoryPermission?${params.toString()}`)
         setPermissions(res?.data || [])
@@ -155,32 +159,47 @@ export default function PermissionsPage({ user, notify }) {
               loadPermissions(1)
             }}
           >
+            <select
+              value={searchBy}
+              onChange={(e) => {
+                setSearchBy(e.target.value)
+                setFilterValue('')
+              }}
+              style={{ width: 195 }}
+            >
+              <option value="0">All Fields (No Filter)</option>
+              <option value="username">By Username</option>
+              <option value="pattern">By Repository Pattern</option>
+            </select>
+
             <input
               type="text"
-              placeholder="Filter by username…"
-              value={filterUsername}
-              onChange={(e) => setFilterUsername(e.target.value)}
-              style={{ width: 220 }}
-            />
-            <input
-              type="text"
-              placeholder="Filter by pattern (e.g. mobyguard/*)…"
-              value={filterPattern}
-              onChange={(e) => setFilterPattern(e.target.value)}
+              disabled={searchBy === '0'}
+              placeholder={
+                searchBy === '0'
+                  ? 'Select a filter field first…'
+                  : searchBy === 'username'
+                    ? 'Enter username…'
+                    : 'Enter pattern (e.g. mobyguard/*)…'
+              }
+              value={filterValue}
+              onChange={(e) => setFilterValue(e.target.value)}
               style={{ width: 260 }}
             />
+
             <button type="submit">
               <Icon name="search" size={14} /> Search
             </button>
-            {(filterUsername || filterPattern) && (
+
+            {searchBy !== '0' && (
               <button
                 type="button"
                 className="ghost"
                 onClick={() => {
-                  setFilterUsername('')
-                  setFilterPattern('')
+                  setSearchBy('0')
+                  setFilterValue('')
                   setPageNumber(1)
-                  setTimeout(() => loadPermissions(1), 0)
+                  loadPermissions(1, '0', '')
                 }}
               >
                 Clear
@@ -308,7 +327,7 @@ export default function PermissionsPage({ user, notify }) {
                   <option value="" disabled>Select user…</option>
                   {usersList.map((u) => (
                     <option key={u.id} value={u.id}>
-                      {u.username} ({u.userType} — {u.firstName} {u.lastName})
+                      {u.username} ({u.userType})
                     </option>
                   ))}
                 </select>

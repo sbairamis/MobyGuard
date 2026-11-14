@@ -12,7 +12,8 @@ public class AuditLogEnums
         Manifest_Deleted = 6,
         Manifest_Pushed = 7,
         Manifest_Pulled = 8,
-        Garbage_Collection_Acknowledged = 9
+        Garbage_Collection_Acknowledged = 9,
+        Retention_Policy_Executed = 10
     }
 
     public enum SearchBy
