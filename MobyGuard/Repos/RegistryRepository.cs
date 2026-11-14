@@ -304,7 +304,11 @@ public class RegistryRepository(
         }
     }
 
-    public async Task<Result<RegistryManifestDto>> GetManifest(string repository, string reference, int callerId)
+    public async Task<Result<RegistryManifestDto>> GetManifest(
+        string repository,
+        string reference,
+        int callerId,
+        string? platformDigest = null)
     {
         try
         {
@@ -395,6 +399,10 @@ public class RegistryRepository(
                         variant = plat.TryGetProperty("variant", out var vProp) ? vProp.GetString() ?? string.Empty : string.Empty;
                     }
 
+                    var isAttestation = string.Equals(arch, "unknown", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(os, "unknown", StringComparison.OrdinalIgnoreCase)
+                        || (string.IsNullOrWhiteSpace(arch) && string.IsNullOrWhiteSpace(os));
+
                     dto.Platforms.Add(new RegistryPlatformDto
                     {
                         Digest = pDigest,
@@ -402,45 +410,70 @@ public class RegistryRepository(
                         Size = pSize,
                         Architecture = arch,
                         Os = os,
-                        Variant = variant
+                        Variant = variant,
+                        IsAttestation = isAttestation
                     });
                 }
 
-                dto.TotalSizeBytes = dto.Platforms.Sum(p => p.Size);
+                dto.Platforms = dto.Platforms
+                    .OrderBy(p => p.IsAttestation)
+                    .ThenBy(p => p.Os, StringComparer.OrdinalIgnoreCase)
+                    .ThenBy(p => p.Architecture, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                RegistryPlatformDto? targetPlatform = null;
+                if (!string.IsNullOrWhiteSpace(platformDigest))
+                {
+                    targetPlatform = dto.Platforms.FirstOrDefault(p =>
+                        string.Equals(p.Digest, platformDigest.Trim(), StringComparison.OrdinalIgnoreCase));
+                    if (targetPlatform is null)
+                    {
+                        return Result<RegistryManifestDto>.Failure(RepositoryStatus.NotFound, ResponseMessages.RegistryManifestNotFound);
+                    }
+                }
+                else
+                {
+                    targetPlatform = dto.Platforms.FirstOrDefault(p =>
+                            !p.IsAttestation
+                            && string.Equals(p.Os, "linux", StringComparison.OrdinalIgnoreCase)
+                            && string.Equals(p.Architecture, "amd64", StringComparison.OrdinalIgnoreCase))
+                        ?? dto.Platforms.FirstOrDefault(p => !p.IsAttestation)
+                        ?? dto.Platforms.FirstOrDefault();
+                }
+
+                if (targetPlatform is not null && !string.IsNullOrWhiteSpace(targetPlatform.Digest))
+                {
+                    dto.SelectedPlatformDigest = targetPlatform.Digest;
+                    dto.Architecture = targetPlatform.Architecture;
+                    dto.Os = targetPlatform.Os;
+
+                    using var platReq = new HttpRequestMessage(
+                        HttpMethod.Get,
+                        $"/v2/{repoName}/manifests/{Uri.EscapeDataString(targetPlatform.Digest)}");
+                    foreach (var accept in ManifestAcceptHeaders)
+                    {
+                        platReq.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
+                    }
+
+                    using var platRes = await client.SendAsync(platReq);
+                    if (platRes.IsSuccessStatusCode)
+                    {
+                        await using var platStream = await platRes.Content.ReadAsStreamAsync();
+                        using var platDoc = await JsonDocument.ParseAsync(platStream);
+                        await PopulateSingleManifestLayersAndConfigAsync(client, repoName, platDoc.RootElement, dto);
+                    }
+                }
+
+                if (dto.TotalSizeBytes == 0)
+                {
+                    dto.TotalSizeBytes = dto.Platforms.Sum(p => p.Size);
+                }
+
                 return Result<RegistryManifestDto>.Success(dto);
             }
 
             // Single-arch Manifest
-            if (root.TryGetProperty("layers", out var layersElement) && layersElement.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var layer in layersElement.EnumerateArray())
-                {
-                    var lDigest = layer.TryGetProperty("digest", out var ldProp) ? ldProp.GetString() ?? string.Empty : string.Empty;
-                    var lMedia = layer.TryGetProperty("mediaType", out var lmProp) ? lmProp.GetString() ?? string.Empty : string.Empty;
-                    var lSize = layer.TryGetProperty("size", out var lsProp) && lsProp.TryGetInt64(out var lsz) ? lsz : 0L;
-
-                    dto.Layers.Add(new RegistryLayerDto
-                    {
-                        Digest = lDigest,
-                        MediaType = lMedia,
-                        Size = lSize
-                    });
-                }
-
-                dto.TotalSizeBytes = dto.Layers.Sum(l => l.Size);
-            }
-
-            // Inspect Config Blob for architecture, OS, created date, entrypoint, cmd, env, exposed ports
-            if (root.TryGetProperty("config", out var configElement)
-                && configElement.ValueKind == JsonValueKind.Object
-                && configElement.TryGetProperty("digest", out var configDigestProp))
-            {
-                var configDigest = configDigestProp.GetString();
-                if (!string.IsNullOrWhiteSpace(configDigest))
-                {
-                    await PopulateConfigDetailsAsync(client, repoName, configDigest, dto);
-                }
-            }
+            await PopulateSingleManifestLayersAndConfigAsync(client, repoName, root, dto);
 
             return Result<RegistryManifestDto>.Success(dto);
         }
@@ -676,6 +709,43 @@ public class RegistryRepository(
         }
 
         return trimmed;
+    }
+
+    private async Task PopulateSingleManifestLayersAndConfigAsync(
+        HttpClient client,
+        string repoName,
+        JsonElement root,
+        RegistryManifestDto dto)
+    {
+        if (root.TryGetProperty("layers", out var layersElement) && layersElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var layer in layersElement.EnumerateArray())
+            {
+                var lDigest = layer.TryGetProperty("digest", out var ldProp) ? ldProp.GetString() ?? string.Empty : string.Empty;
+                var lMedia = layer.TryGetProperty("mediaType", out var lmProp) ? lmProp.GetString() ?? string.Empty : string.Empty;
+                var lSize = layer.TryGetProperty("size", out var lsProp) && lsProp.TryGetInt64(out var lsz) ? lsz : 0L;
+
+                dto.Layers.Add(new RegistryLayerDto
+                {
+                    Digest = lDigest,
+                    MediaType = lMedia,
+                    Size = lSize
+                });
+            }
+
+            dto.TotalSizeBytes = dto.Layers.Sum(l => l.Size);
+        }
+
+        if (root.TryGetProperty("config", out var configElement)
+            && configElement.ValueKind == JsonValueKind.Object
+            && configElement.TryGetProperty("digest", out var configDigestProp))
+        {
+            var configDigest = configDigestProp.GetString();
+            if (!string.IsNullOrWhiteSpace(configDigest))
+            {
+                await PopulateConfigDetailsAsync(client, repoName, configDigest, dto);
+            }
+        }
     }
 
     private async Task PopulateConfigDetailsAsync(HttpClient client, string repoName, string configDigest, RegistryManifestDto dto)

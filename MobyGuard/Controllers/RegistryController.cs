@@ -54,14 +54,15 @@ public class RegistryController(RegistryRepository repository) : CustomBaseContr
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<RegistryManifestDto>> GetManifest(
         [FromQuery] string repositoryName,
-        [FromQuery] string reference)
+        [FromQuery] string reference,
+        [FromQuery] string? platformDigest = null)
     {
         if (!TryGetCallerId(out var callerId))
         {
             return Unauthorized();
         }
 
-        var result = await repository.GetManifest(repositoryName, reference, callerId);
+        var result = await repository.GetManifest(repositoryName, reference, callerId, platformDigest);
 
         return HandleResult(result);
     }

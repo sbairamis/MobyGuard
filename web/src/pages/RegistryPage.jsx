@@ -60,12 +60,13 @@ export default function RegistryPage({ notify }) {
     }
   }
 
-  async function selectTagOrDigest(repoName, reference) {
+  async function selectTagOrDigest(repoName, reference, platformDigest = null) {
     setSelectedRef(reference)
     setLoadingManifest(true)
     try {
+      const platformQuery = platformDigest ? `&platformDigest=${encodeURIComponent(platformDigest)}` : ''
       const data = await api.get(
-        `/api/v1/Registry/manifest?repositoryName=${encodeURIComponent(repoName)}&reference=${encodeURIComponent(reference)}`
+        `/api/v1/Registry/manifest?repositoryName=${encodeURIComponent(repoName)}&reference=${encodeURIComponent(reference)}${platformQuery}`
       )
       setManifest(data)
     } catch (err) {
@@ -287,7 +288,7 @@ export default function RegistryPage({ notify }) {
                   <div className="dim" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 650 }}>Created</div>
                   <div style={{ fontSize: 13, marginTop: 3 }}>{manifest.createdAt ? formatDate(manifest.createdAt) : 'Multi-arch / N/A'}</div>
                 </div>
-                {!manifest.isMultiArch && (
+                {manifest.layers?.length > 0 && (
                   <div style={{ background: 'var(--bg2)', padding: '10px 12px', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)' }}>
                     <div className="dim" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 650 }}>Layers</div>
                     <div style={{ fontSize: 13, marginTop: 3 }}>{manifest.layers.length} filesystem blobs ({formatBytes(manifest.totalSizeBytes)})</div>
@@ -310,25 +311,30 @@ export default function RegistryPage({ notify }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {manifest.platforms.map((p) => (
-                          <tr key={p.digest}>
-                            <td>
-                              <span className="badge info">
-                                {p.os}/{p.architecture}{p.variant ? `/${p.variant}` : ''}
-                              </span>
-                            </td>
-                            <td className="mono" style={{ fontSize: 12 }}>{p.digest}</td>
-                            <td className="num muted">{formatBytes(p.size)}</td>
-                            <td className="num">
-                              <button
-                                className="sm"
-                                onClick={() => selectTagOrDigest(manifest.repository, p.digest)}
-                              >
-                                Inspect Platform Layers
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
+                        {manifest.platforms.map((p) => {
+                          const isSelected = manifest.selectedPlatformDigest === p.digest
+                          return (
+                            <tr key={p.digest}>
+                              <td>
+                                <span className={`badge ${p.isAttestation ? '' : isSelected ? 'ok' : 'info'}`}>
+                                  {p.os}/{p.architecture}{p.variant ? `/${p.variant}` : ''}
+                                  {p.isAttestation ? ' (attestation)' : ''}
+                                </span>
+                              </td>
+                              <td className="mono" style={{ fontSize: 12 }}>{p.digest}</td>
+                              <td className="num muted">{formatBytes(p.size)}</td>
+                              <td className="num">
+                                <button
+                                  className="sm"
+                                  disabled={isSelected}
+                                  onClick={() => selectTagOrDigest(manifest.repository, manifest.reference, p.digest)}
+                                >
+                                  {isSelected ? 'Inspecting' : 'Inspect Platform'}
+                                </button>
+                              </td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -336,7 +342,7 @@ export default function RegistryPage({ notify }) {
               )}
 
               {/* Config Runtime Details */}
-              {!manifest.isMultiArch && (manifest.entrypoint?.length > 0 || manifest.cmd?.length > 0 || manifest.exposedPorts?.length > 0) && (
+              {(manifest.entrypoint?.length > 0 || manifest.cmd?.length > 0 || manifest.exposedPorts?.length > 0) && (
                 <div>
                   <h3>Container Config Blob Settings</h3>
                   <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 6, fontSize: 13, background: 'var(--bg2)', padding: 12, borderRadius: 'var(--r-sm)', border: '1px solid var(--border)' }}>
@@ -366,8 +372,8 @@ export default function RegistryPage({ notify }) {
                 </div>
               )}
 
-              {/* Single-Arch Layers Breakdown */}
-              {!manifest.isMultiArch && manifest.layers?.length > 0 && (
+              {/* Layers Breakdown */}
+              {manifest.layers?.length > 0 && (
                 <div>
                   <h3>Filesystem Layer Blobs ({manifest.layers.length})</h3>
                   <div className="table-wrap" style={{ border: '1px solid var(--border)', borderRadius: 'var(--r-sm)' }}>
