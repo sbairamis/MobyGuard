@@ -357,4 +357,54 @@ public class RegistryControllerTests : IClassFixture<CustomWebApplicationFactory
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, unknownPlatformRes.StatusCode);
     }
+
+    [Fact]
+    public async Task GarbageCollectionStatus_TracksDeletedManifestsAndAdminAcknowledgeResetsPendingCount()
+    {
+        var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+        var userClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.User);
+
+        var statusBefore = await userClient.GetFromJsonAsync<RegistryGarbageCollectionStatusDto>(
+            "/api/v1/Registry/garbage-collection",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(statusBefore);
+        Assert.Equal(0, statusBefore.PendingDeletedManifestsCount);
+        Assert.Null(statusBefore.LastDeletedAt);
+        Assert.Null(statusBefore.LastAcknowledgedAt);
+        Assert.Contains("garbage-collect", statusBefore.RecommendedCommand);
+
+        // Delete a manifest
+        var deleteRes = await adminClient.DeleteAsync(
+            "/api/v1/Registry/manifest?repositoryName=team-a/demo-app&reference=v1.0.0",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, deleteRes.StatusCode);
+
+        var statusAfterDelete = await userClient.GetFromJsonAsync<RegistryGarbageCollectionStatusDto>(
+            "/api/v1/Registry/garbage-collection",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(statusAfterDelete);
+        Assert.Equal(1, statusAfterDelete.PendingDeletedManifestsCount);
+        Assert.NotNull(statusAfterDelete.LastDeletedAt);
+
+        // Standard user cannot acknowledge garbage collection
+        var forbiddenAck = await userClient.PostAsync(
+            "/api/v1/Registry/garbage-collection/acknowledge",
+            null,
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Forbidden, forbiddenAck.StatusCode);
+
+        // Admin acknowledges garbage collection
+        var ackRes = await adminClient.PostAsync(
+            "/api/v1/Registry/garbage-collection/acknowledge",
+            null,
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, ackRes.StatusCode);
+
+        var statusAfterAck = await ackRes.Content.ReadFromJsonAsync<RegistryGarbageCollectionStatusDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(statusAfterAck);
+        Assert.Equal(0, statusAfterAck.PendingDeletedManifestsCount);
+        Assert.Null(statusAfterAck.LastDeletedAt);
+        Assert.NotNull(statusAfterAck.LastAcknowledgedAt);
+        Assert.Equal("Admin", statusAfterAck.LastAcknowledgedBy);
+    }
 }

@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19" />
   <img src="https://img.shields.io/badge/Docker-Registry_v2%2Fv3-2496ED?logo=docker&logoColor=white" alt="Docker Registry" />
   <img src="https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&logoColor=white" alt="SQLite" />
-  <img src="https://img.shields.io/badge/coverage-85.6%25-brightgreen" alt="Code Coverage" />
+  <img src="https://img.shields.io/badge/coverage-87.4%25-brightgreen" alt="Code Coverage" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
 </p>
 
@@ -331,7 +331,7 @@ For headless CI/CD systems (GitHub Actions, GitLab CI, Drone, Jenkins):
 * **Database**: [SQLite](https://www.sqlite.org/) for embedded relational persistence, policy storage, and hashed refresh tokens.
 * **Cache**: Built-in .NET `IMemoryCache` for short-lived JWT revocation (`jti`) and brute-force lockout counters.
 * **Token Signer**: Cryptographic ECDSA `ES256` token signing.
-* **Testing**: Integration testing with xUnit v3, `WebApplicationFactory`, and `Microsoft.Testing.Extensions.CodeCoverage` (~85.6% line coverage).
+* **Testing**: Integration testing with xUnit v3, `WebApplicationFactory`, and `Microsoft.Testing.Extensions.CodeCoverage` (~87.4% line coverage).
 
 ---
 
