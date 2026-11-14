@@ -333,7 +333,7 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         var statusBefore = await client.GetFromJsonAsync<SetupStatusDto>("/api/v1/User/setup-status", TestContext.Current.CancellationToken);
         Assert.NotNull(statusBefore);
         Assert.True(statusBefore.SetupRequired);
-        Assert.Equal("v1.0.7", statusBefore.ApiVersion);
+        Assert.Equal("v1.0.8", statusBefore.ApiVersion);
 
         var setupResponse = await client.PostAsJsonAsync(
             "/api/v1/User/setup",
