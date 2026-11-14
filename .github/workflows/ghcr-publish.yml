@@ -105,4 +105,4 @@ jobs:
           cache-to: type=gha,mode=max
           tags: |
             ghcr.io/${{ steps.string.outputs.repo }}:latest
-            ghcr.io/${{ steps.string.outputs.repo }}:${{ github.ref_name }}
+            ${{ startsWith(github.ref, 'refs/tags/v') && format('ghcr.io/{0}:{1}', steps.string.outputs.repo, github.ref_name) || '' }}
