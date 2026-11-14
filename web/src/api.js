@@ -1,4 +1,5 @@
 const STORAGE_KEY = 'mobyguard_session'
+export const DASHBOARD_VERSION = 'v1.0.7'
 
 const ERROR_MESSAGES = {
   _invalidCredentials: 'Invalid username or password.',
@@ -11,6 +12,8 @@ const ERROR_MESSAGES = {
   _cannotDeleteYourself: 'You cannot delete your own account.',
   _cannotChangeOwnTypeOrStatus: 'You cannot demote or deactivate your own admin account.',
   _invalidCurrentPassword: 'Your current password is incorrect.',
+  _passwordPolicyViolation: 'Password must be 8–128 characters and include uppercase, lowercase, number, and symbol (no spaces).',
+  _passwordBlacklisted: 'This password is on the common password blacklist or contains your username. Choose a stronger password.',
   _userTypeNotFound: 'Role / UserType not found.',
   _userTypeAlreadyExists: 'That role already exists.',
   _cannotDeleteSystemUserType: 'Built-in system roles (Admin, User, Service) cannot be modified or deleted.',

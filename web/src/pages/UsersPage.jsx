@@ -19,8 +19,6 @@ export default function UsersPage({ user: currentUser, notify }) {
   const [selectedUser, setSelectedUser] = useState(null)
 
   const [username, setUsername] = useState('')
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
   const [password, setPassword] = useState('')
   const [userTypeId, setUserTypeId] = useState('')
   const [isActive, setIsActive] = useState(true)
@@ -61,8 +59,6 @@ export default function UsersPage({ user: currentUser, notify }) {
   function openAddModal() {
     setSelectedUser(null)
     setUsername('')
-    setFirstName('')
-    setLastName('')
     setPassword('')
     const defaultRole = userTypes.find((t) => t.type === 'User') || userTypes[0]
     setUserTypeId(defaultRole ? String(defaultRole.id) : '2')
@@ -73,8 +69,6 @@ export default function UsersPage({ user: currentUser, notify }) {
   function openEditModal(u) {
     setSelectedUser(u)
     setUsername(u.username)
-    setFirstName(u.firstName)
-    setLastName(u.lastName)
     setUserTypeId(String(u.userTypeId))
     setIsActive(u.isActive)
     setModalMode('edit')
@@ -93,8 +87,6 @@ export default function UsersPage({ user: currentUser, notify }) {
       if (modalMode === 'add') {
         await api.post('/api/v1/User', {
           username: username.trim(),
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
           password,
           userTypeId: Number(userTypeId)
         })
@@ -102,8 +94,6 @@ export default function UsersPage({ user: currentUser, notify }) {
       } else if (modalMode === 'edit') {
         await api.put(`/api/v1/User/${selectedUser.id}`, {
           username: username.trim(),
-          firstName: firstName.trim(),
-          lastName: lastName.trim(),
           userTypeId: Number(userTypeId),
           isActive
         })
@@ -206,7 +196,6 @@ export default function UsersPage({ user: currentUser, notify }) {
                 <th>ID</th>
                 <th>Username</th>
                 <th>Role</th>
-                <th>Full Name</th>
                 <th>Status</th>
                 <th>Last Login / Token</th>
                 {isAdmin && <th className="num">Actions</th>}
@@ -215,13 +204,13 @@ export default function UsersPage({ user: currentUser, notify }) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={isAdmin ? 7 : 6} className="empty">
+                  <td colSpan={isAdmin ? 6 : 5} className="empty">
                     <span className="spin" /> Loading accounts…
                   </td>
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td colSpan={isAdmin ? 7 : 6} className="empty">
+                  <td colSpan={isAdmin ? 6 : 5} className="empty">
                     No users found.
                   </td>
                 </tr>
@@ -237,7 +226,6 @@ export default function UsersPage({ user: currentUser, notify }) {
                         {u.userType}
                       </span>
                     </td>
-                    <td>{u.firstName} {u.lastName}</td>
                     <td>
                       <span className={`badge ${u.isActive ? 'ok' : 'err'}`}>
                         {u.isActive ? 'Active' : 'Disabled'}
@@ -318,12 +306,15 @@ export default function UsersPage({ user: currentUser, notify }) {
                 <input
                   type="password"
                   required
-                  minLength={4}
+                  minLength={8}
                   autoFocus
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter new password…"
                 />
+                <span className="muted" style={{ fontSize: 11.5 }}>
+                  Must be 8–128 characters with uppercase, lowercase, number, and symbol.
+                </span>
               </label>
             ) : (
               <>
@@ -348,37 +339,19 @@ export default function UsersPage({ user: currentUser, notify }) {
                   </label>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <label className="field">
-                    First Name
-                    <input
-                      type="text"
-                      required
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                    />
-                  </label>
-                  <label className="field">
-                    Last Name
-                    <input
-                      type="text"
-                      required
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                    />
-                  </label>
-                </div>
-
                 {modalMode === 'add' && (
                   <label className="field">
                     Password
                     <input
                       type="password"
                       required
-                      minLength={4}
+                      minLength={8}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                     />
+                    <span className="muted" style={{ fontSize: 11.5 }}>
+                      Must be 8–128 characters with uppercase, lowercase, number, and symbol.
+                    </span>
                   </label>
                 )}
 

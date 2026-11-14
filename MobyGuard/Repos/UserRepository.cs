@@ -32,7 +32,11 @@ public class UserRepository(
         try
         {
             var hasUsers = await context.Users.AnyAsync();
-            return Result<SetupStatusDto>.Success(new SetupStatusDto { SetupRequired = !hasUsers });
+            return Result<SetupStatusDto>.Success(new SetupStatusDto
+            {
+                SetupRequired = !hasUsers,
+                ApiVersion = "v1.0.7"
+            });
         }
         catch (Exception ex)
         {
@@ -50,6 +54,12 @@ public class UserRepository(
                 return Result<LoginResponseDto>.Failure(RepositoryStatus.Conflict, ResponseMessages.SetupAlreadyCompleted);
             }
 
+            var (isValidPassword, passwordError) = PasswordPolicyValidator.Validate(dto.Password, dto.Username);
+            if (!isValidPassword)
+            {
+                return Result<LoginResponseDto>.Failure(RepositoryStatus.BadRequest, passwordError);
+            }
+
             var adminType = await context.UserTypes.FirstOrDefaultAsync(ut => ut.Type == Roles.Admin);
             if (adminType is null)
             {
@@ -62,8 +72,6 @@ public class UserRepository(
             var user = new User
             {
                 Username = dto.Username.Trim(),
-                FirstName = dto.FirstName.Trim(),
-                LastName = dto.LastName.Trim(),
                 Password = PasswordHasher.Hash(dto.Password, salt),
                 Salt = salt,
                 IsActive = true,
@@ -305,6 +313,12 @@ public class UserRepository(
                 return Result<UserDto>.Failure(RepositoryStatus.Conflict, ResponseMessages.UserExists);
             }
 
+            var (isValidPassword, passwordError) = PasswordPolicyValidator.Validate(addUserDto.Password, addUserDto.Username);
+            if (!isValidPassword)
+            {
+                return Result<UserDto>.Failure(RepositoryStatus.BadRequest, passwordError);
+            }
+
             var userType = await context.UserTypes.FirstOrDefaultAsync(ut => ut.Id == addUserDto.UserTypeId);
 
             if (userType is null)
@@ -317,8 +331,6 @@ public class UserRepository(
             var user = new User
             {
                 Username = addUserDto.Username,
-                FirstName = addUserDto.FirstName,
-                LastName = addUserDto.LastName,
                 Password = PasswordHasher.Hash(addUserDto.Password, salt),
                 Salt = salt,
                 IsActive = true,
@@ -341,8 +353,6 @@ public class UserRepository(
             {
                 Id = user.Id,
                 Username = user.Username,
-                FirstName = user.FirstName,
-                LastName = user.LastName,
                 IsActive = user.IsActive,
                 LastLogin = user.LastLogin,
                 UserTypeId = user.UserTypeId,
@@ -384,35 +394,6 @@ public class UserRepository(
         }
     }
 
-    public async Task<Result> UpdateMe(UpdateMeDto updateMeDto, int callerId)
-    {
-        try
-        {
-            var user = await context.Users.FindAsync(callerId);
-
-            if (user is null)
-            {
-                return Result.Failure(RepositoryStatus.NotFound, ResponseMessages.UserNotFound);
-            }
-
-            user.FirstName = updateMeDto.FirstName;
-            user.LastName = updateMeDto.LastName;
-            user.UpdatedAt = DateTime.UtcNow;
-
-            await context.SaveChangesAsync();
-
-            sessionService.ClearAllUserLoginRetries(callerId);
-
-            return Result.Success();
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "An unexpected error occurred while trying to update profile for user with id: {Id}", callerId);
-
-            return Result.Failure(RepositoryStatus.InternalServerError, ResponseMessages.InternalServerError);
-        }
-    }
-
     public async Task<Result> Update(int id, UpdateUserDto updateUserDto, int callerId)
     {
         try
@@ -448,8 +429,6 @@ public class UserRepository(
             user.Username = updateUserDto.Username;
             user.UserTypeId = updateUserDto.UserTypeId;
             user.IsActive = updateUserDto.IsActive;
-            user.FirstName = updateUserDto.FirstName;
-            user.LastName = updateUserDto.LastName;
             user.UpdatedAt = DateTime.UtcNow;
 
             await context.SaveChangesAsync();
@@ -490,6 +469,12 @@ public class UserRepository(
                 return Result.Failure(RepositoryStatus.BadRequest, ResponseMessages.InvalidCurrentPassword);
             }
 
+            var (isValidPassword, passwordError) = PasswordPolicyValidator.Validate(changePasswordDto.Password, user.Username);
+            if (!isValidPassword)
+            {
+                return Result.Failure(RepositoryStatus.BadRequest, passwordError);
+            }
+
             await SetPassword(user, changePasswordDto.Password, invalidateSessions: false);
 
             return Result.Success();
@@ -511,6 +496,12 @@ public class UserRepository(
             if (user is null)
             {
                 return Result.Failure(RepositoryStatus.NotFound, ResponseMessages.UserNotFound);
+            }
+
+            var (isValidPassword, passwordError) = PasswordPolicyValidator.Validate(resetPasswordDto.Password, user.Username);
+            if (!isValidPassword)
+            {
+                return Result.Failure(RepositoryStatus.BadRequest, passwordError);
             }
 
             await SetPassword(user, resetPasswordDto.Password, invalidateSessions: true);
@@ -624,8 +615,6 @@ public class UserRepository(
     {
         Id = user.Id,
         Username = user.Username,
-        FirstName = user.FirstName,
-        LastName = user.LastName,
         IsActive = user.IsActive,
         LastLogin = user.LastLogin,
         UserTypeId = user.UserTypeId,

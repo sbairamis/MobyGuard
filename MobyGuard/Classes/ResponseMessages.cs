@@ -25,6 +25,10 @@ public class ResponseMessages
 
     public const string InvalidCurrentPassword = "_invalidCurrentPassword";
 
+    public const string PasswordPolicyViolation = "_passwordPolicyViolation";
+
+    public const string PasswordBlacklisted = "_passwordBlacklisted";
+
 
     public const string UserTypeNotFound = "_userTypeNotFound";
 
