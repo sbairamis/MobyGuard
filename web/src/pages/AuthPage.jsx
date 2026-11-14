@@ -15,7 +15,7 @@ export default function AuthPage({ setupRequired, onAuthenticated, notify }) {
     setLoading(true)
     try {
       if (setupRequired) {
-        const res = await api.post('/api/User/setup', {
+        const res = await api.post('/api/v1/User/setup', {
           username,
           firstName,
           lastName,
@@ -24,7 +24,7 @@ export default function AuthPage({ setupRequired, onAuthenticated, notify }) {
         notify('Initial Admin account created.', 'ok')
         onAuthenticated(res)
       } else {
-        const res = await api.post('/api/User/login', {
+        const res = await api.post('/api/v1/User/login', {
           username,
           password
         })

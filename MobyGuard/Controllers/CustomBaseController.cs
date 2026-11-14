@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Asp.Versioning;
 using Microsoft.AspNetCore.Mvc;
 using MobyGuard.Classes;
 using MobyGuard.Enumerators;
@@ -6,7 +7,8 @@ using MobyGuard.Enumerators;
 namespace MobyGuard.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[ApiVersion(1.0)]
+[Route("api/v{version:apiVersion}/[controller]")]
 public abstract class CustomBaseController : ControllerBase
 {
     private int? CallerId => int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;

@@ -22,7 +22,7 @@ export default function RegistryPage({ notify }) {
     setLoadingRepos(true)
     setRepoError('')
     try {
-      const list = await api.get('/api/Registry/repositories')
+      const list = await api.get('/api/v1/Registry/repositories')
       setRepos(list || [])
       if (list?.length > 0 && !selectedRepo) {
         selectRepository(list[0])
@@ -40,7 +40,7 @@ export default function RegistryPage({ notify }) {
     setManifest(null)
     setLoadingTags(true)
     try {
-      const data = await api.get(`/api/Registry/tags?repositoryName=${encodeURIComponent(repo.name)}`)
+      const data = await api.get(`/api/v1/Registry/tags?repositoryName=${encodeURIComponent(repo.name)}`)
       setTagsData(data)
       if (data?.tags?.length > 0) {
         const preferred = data.tags.includes('latest') ? 'latest' : data.tags[0]
@@ -58,7 +58,7 @@ export default function RegistryPage({ notify }) {
     setLoadingManifest(true)
     try {
       const data = await api.get(
-        `/api/Registry/manifest?repositoryName=${encodeURIComponent(repoName)}&reference=${encodeURIComponent(reference)}`
+        `/api/v1/Registry/manifest?repositoryName=${encodeURIComponent(repoName)}&reference=${encodeURIComponent(reference)}`
       )
       setManifest(data)
     } catch (err) {
@@ -76,7 +76,7 @@ export default function RegistryPage({ notify }) {
     }
     try {
       await api.del(
-        `/api/Registry/manifest?repositoryName=${encodeURIComponent(selectedRepo.name)}&reference=${encodeURIComponent(reference)}`
+        `/api/v1/Registry/manifest?repositoryName=${encodeURIComponent(selectedRepo.name)}&reference=${encodeURIComponent(reference)}`
       )
       notify(`Deleted ${selectedRepo.name}:${reference}`, 'ok')
       await selectRepository(selectedRepo)

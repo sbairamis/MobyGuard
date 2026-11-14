@@ -38,7 +38,7 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
             CanDelete = false
         };
 
-        var response = await client.PostAsJsonAsync("/api/RepositoryPermission", dto, TestContext.Current.CancellationToken);
+        var response = await client.PostAsJsonAsync("/api/v1/RepositoryPermission", dto, TestContext.Current.CancellationToken);
 
         Assert.Equal(expectedStatus, response.StatusCode);
 
@@ -64,9 +64,9 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
             CanPull = true
         };
 
-        await client.PostAsJsonAsync("/api/RepositoryPermission", dto, TestContext.Current.CancellationToken);
+        await client.PostAsJsonAsync("/api/v1/RepositoryPermission", dto, TestContext.Current.CancellationToken);
 
-        var duplicateResponse = await client.PostAsJsonAsync("/api/RepositoryPermission", dto, TestContext.Current.CancellationToken);
+        var duplicateResponse = await client.PostAsJsonAsync("/api/v1/RepositoryPermission", dto, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Conflict, duplicateResponse.StatusCode);
 
@@ -86,7 +86,7 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
             CanPull = true
         };
 
-        var response = await client.PostAsJsonAsync("/api/RepositoryPermission", dto, TestContext.Current.CancellationToken);
+        var response = await client.PostAsJsonAsync("/api/v1/RepositoryPermission", dto, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
@@ -108,7 +108,7 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
             CanDelete = false
         };
 
-        var response = await client.PostAsJsonAsync("/api/RepositoryPermission", dto, TestContext.Current.CancellationToken);
+        var response = await client.PostAsJsonAsync("/api/v1/RepositoryPermission", dto, TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
 
@@ -122,7 +122,7 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
         var client = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
 
         var createResponse = await client.PostAsJsonAsync(
-            "/api/RepositoryPermission",
+            "/api/v1/RepositoryPermission",
             new AddRepositoryPermissionDto
             {
                 UserId = (int)PrimaryKeys.UserTypes.User,
@@ -135,7 +135,7 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
         var created = await createResponse.Content.ReadFromJsonAsync<RepositoryPermissionDto>(cancellationToken: TestContext.Current.CancellationToken);
 
         var updateResponse = await client.PutAsJsonAsync(
-            $"/api/RepositoryPermission/{created!.Id}",
+            $"/api/v1/RepositoryPermission/{created!.Id}",
             new UpdateRepositoryPermissionDto
             {
                 RepositoryPattern = "mobyguard/app-v2",
@@ -148,16 +148,16 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
         Assert.Equal(HttpStatusCode.NoContent, updateResponse.StatusCode);
 
         var updated = await client.GetFromJsonAsync<RepositoryPermissionDto>(
-            $"/api/RepositoryPermission/{created.Id}",
+            $"/api/v1/RepositoryPermission/{created.Id}",
             TestContext.Current.CancellationToken);
 
         Assert.Equal("mobyguard/app-v2", updated!.RepositoryPattern);
         Assert.True(updated.CanPush);
 
-        var deleteResponse = await client.DeleteAsync($"/api/RepositoryPermission/{created.Id}", TestContext.Current.CancellationToken);
+        var deleteResponse = await client.DeleteAsync($"/api/v1/RepositoryPermission/{created.Id}", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
 
-        var getAfterDelete = await client.GetAsync($"/api/RepositoryPermission/{created.Id}", TestContext.Current.CancellationToken);
+        var getAfterDelete = await client.GetAsync($"/api/v1/RepositoryPermission/{created.Id}", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, getAfterDelete.StatusCode);
     }
 
@@ -167,17 +167,17 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
         var client = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
 
         await client.PostAsJsonAsync(
-            "/api/RepositoryPermission",
+            "/api/v1/RepositoryPermission",
             new AddRepositoryPermissionDto { UserId = (int)PrimaryKeys.UserTypes.User, RepositoryPattern = "team-a/*", CanPull = true },
             TestContext.Current.CancellationToken);
 
         await client.PostAsJsonAsync(
-            "/api/RepositoryPermission",
+            "/api/v1/RepositoryPermission",
             new AddRepositoryPermissionDto { UserId = (int)PrimaryKeys.UserTypes.Service, RepositoryPattern = "team-b/*", CanPull = true },
             TestContext.Current.CancellationToken);
 
         var paged = await client.GetFromJsonAsync<PagedResponse<List<RepositoryPermissionDto>>>(
-            $"/api/RepositoryPermission?UserId={(int)PrimaryKeys.UserTypes.User}&PageNumber=1&PageSize=10",
+            $"/api/v1/RepositoryPermission?UserId={(int)PrimaryKeys.UserTypes.User}&PageNumber=1&PageSize=10",
             TestContext.Current.CancellationToken);
 
         Assert.NotNull(paged);
@@ -192,18 +192,18 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
         var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
 
         await adminClient.PostAsJsonAsync(
-            "/api/RepositoryPermission",
+            "/api/v1/RepositoryPermission",
             new AddRepositoryPermissionDto { UserId = (int)PrimaryKeys.UserTypes.User, RepositoryPattern = "team-a/*", CanPull = true },
             TestContext.Current.CancellationToken);
 
         await adminClient.PostAsJsonAsync(
-            "/api/RepositoryPermission",
+            "/api/v1/RepositoryPermission",
             new AddRepositoryPermissionDto { UserId = (int)PrimaryKeys.UserTypes.Service, RepositoryPattern = "team-secret/*", CanPull = true },
             TestContext.Current.CancellationToken);
 
         var userClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.User);
 
-        var myPermsResponse = await userClient.GetAsync("/api/RepositoryPermission/me", TestContext.Current.CancellationToken);
+        var myPermsResponse = await userClient.GetAsync("/api/v1/RepositoryPermission/me", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, myPermsResponse.StatusCode);
 
         var myPerms = await myPermsResponse.Content.ReadFromJsonAsync<List<RepositoryPermissionDto>>(cancellationToken: TestContext.Current.CancellationToken);
@@ -211,10 +211,10 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
         Assert.Single(myPerms);
         Assert.Equal("team-a/*", myPerms[0].RepositoryPattern);
 
-        var globalListResponse = await userClient.GetAsync("/api/RepositoryPermission", TestContext.Current.CancellationToken);
+        var globalListResponse = await userClient.GetAsync("/api/v1/RepositoryPermission", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, globalListResponse.StatusCode);
 
-        var otherUserPermsResponse = await userClient.GetAsync($"/api/RepositoryPermission/user/{(int)PrimaryKeys.UserTypes.Service}", TestContext.Current.CancellationToken);
+        var otherUserPermsResponse = await userClient.GetAsync($"/api/v1/RepositoryPermission/user/{(int)PrimaryKeys.UserTypes.Service}", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Forbidden, otherUserPermsResponse.StatusCode);
     }
 }

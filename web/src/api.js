@@ -4,7 +4,7 @@ const ERROR_MESSAGES = {
   _invalidCredentials: 'Invalid username or password.',
   _invalidRefreshToken: 'Your session has expired. Please sign in again.',
   _userIsInactive: 'This account has been deactivated.',
-  _serviceAccountCannotLogin: 'Service accounts can only authenticate via Docker CLI (/api/Token), not the web UI.',
+  _serviceAccountCannotLogin: 'Service accounts can only authenticate via Docker CLI (/api/v1/Token), not the web UI.',
   _tooManyRequests: 'Too many failed login attempts. Please wait 15 minutes.',
   _userNotFound: 'User not found.',
   _userAlreadyExists: 'A user with that username already exists.',
@@ -56,7 +56,7 @@ async function doRefreshToken() {
     throw new Error('No refresh token available.')
   }
 
-  const res = await fetch('/api/User/refresh', {
+  const res = await fetch('/api/v1/User/refresh', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ refreshToken: session.refreshToken })

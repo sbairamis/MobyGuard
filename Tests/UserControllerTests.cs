@@ -31,7 +31,7 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Forwarded-For", clientAddress);
         return client.PostAsJsonAsync(
-            "/api/User/login",
+            "/api/v1/User/login",
             new LoginUserDto { Username = username, Password = password },
             TestContext.Current.CancellationToken);
     }
@@ -81,7 +81,7 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
 
         var client = _factory.CreateClient();
         var refreshResponse = await client.PostAsJsonAsync(
-            "/api/User/refresh",
+            "/api/v1/User/refresh",
             new RefreshTokenDto { RefreshToken = originalRefreshToken },
             TestContext.Current.CancellationToken);
 
@@ -94,7 +94,7 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
 
         // Attempting to reuse the consumed refresh token should fail with 401
         var reuseResponse = await client.PostAsJsonAsync(
-            "/api/User/refresh",
+            "/api/v1/User/refresh",
             new RefreshTokenDto { RefreshToken = originalRefreshToken },
             TestContext.Current.CancellationToken);
 
@@ -112,7 +112,7 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         userClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginBody.Token);
 
         // Verify active token works
-        var meResponseBefore = await userClient.GetAsync("/api/User/me", TestContext.Current.CancellationToken);
+        var meResponseBefore = await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, meResponseBefore.StatusCode);
 
         // Admin deactivates the user
@@ -127,18 +127,18 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         };
 
         var updateResponse = await adminClient.PutAsJsonAsync(
-            $"/api/User/{(int)PrimaryKeys.UserTypes.User}",
+            $"/api/v1/User/{(int)PrimaryKeys.UserTypes.User}",
             updateDto,
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, updateResponse.StatusCode);
 
         // The user's 15-minute access token must immediately be rejected with 401
-        var meResponseAfter = await userClient.GetAsync("/api/User/me", TestContext.Current.CancellationToken);
+        var meResponseAfter = await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, meResponseAfter.StatusCode);
 
         // Refresh token must also fail immediately
         var refreshResponse = await _factory.CreateClient().PostAsJsonAsync(
-            "/api/User/refresh",
+            "/api/v1/User/refresh",
             new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
             TestContext.Current.CancellationToken);
         Assert.True(refreshResponse.StatusCode == HttpStatusCode.Unauthorized || refreshResponse.StatusCode == HttpStatusCode.Forbidden);
@@ -155,23 +155,23 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         userClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginBody.Token);
 
         // Verify active token works
-        var meResponseBefore = await userClient.GetAsync("/api/User/me", TestContext.Current.CancellationToken);
+        var meResponseBefore = await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, meResponseBefore.StatusCode);
 
         // Admin deletes the user
         var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
         var deleteResponse = await adminClient.DeleteAsync(
-            $"/api/User/{(int)PrimaryKeys.UserTypes.User}",
+            $"/api/v1/User/{(int)PrimaryKeys.UserTypes.User}",
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
 
         // The deleted user's access token must immediately fail
-        var meResponseAfter = await userClient.GetAsync("/api/User/me", TestContext.Current.CancellationToken);
+        var meResponseAfter = await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, meResponseAfter.StatusCode);
 
         // Refresh token must also fail
         var refreshResponse = await _factory.CreateClient().PostAsJsonAsync(
-            "/api/User/refresh",
+            "/api/v1/User/refresh",
             new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, refreshResponse.StatusCode);
@@ -205,7 +205,7 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
     {
         var client = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
 
-        var response = await client.DeleteAsync($"/api/User/{(int)PrimaryKeys.UserTypes.Admin}", TestContext.Current.CancellationToken);
+        var response = await client.DeleteAsync($"/api/v1/User/{(int)PrimaryKeys.UserTypes.Admin}", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
 
@@ -235,7 +235,7 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         }
 
         var refreshResponse = await _factory.CreateClient().PostAsJsonAsync(
-            "/api/User/refresh",
+            "/api/v1/User/refresh",
             new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
             TestContext.Current.CancellationToken);
 
@@ -251,7 +251,7 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
 
         var tasks = Enumerable.Range(0, 6)
             .Select(_ => _factory.CreateClient().PostAsJsonAsync(
-                "/api/User/refresh",
+                "/api/v1/User/refresh",
                 new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
                 TestContext.Current.CancellationToken))
             .ToArray();
@@ -282,16 +282,16 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         userClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginBody.Token);
 
         var updateResponse = await userClient.PutAsJsonAsync(
-            "/api/User/me",
+            "/api/v1/User/me",
             new UpdateMeDto { FirstName = "Updated", LastName = "User" },
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, updateResponse.StatusCode);
 
         // Existing access token, refresh token, and cleared lockout IP must all work
-        Assert.Equal(HttpStatusCode.OK, (await userClient.GetAsync("/api/User/me", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await LoginFromAsync("198.51.100.77", "User", "user")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await _factory.CreateClient().PostAsJsonAsync(
-            "/api/User/refresh",
+            "/api/v1/User/refresh",
             new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
             TestContext.Current.CancellationToken)).StatusCode);
     }
@@ -301,10 +301,191 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
     {
         var userClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.User);
 
-        Assert.Equal(HttpStatusCode.Forbidden, (await userClient.GetAsync("/api/User", TestContext.Current.CancellationToken)).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await userClient.GetAsync($"/api/User/{(int)PrimaryKeys.UserTypes.Admin}", TestContext.Current.CancellationToken)).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await userClient.GetAsync("/api/AuditLog", TestContext.Current.CancellationToken)).StatusCode);
-        Assert.Equal(HttpStatusCode.Forbidden, (await userClient.GetAsync("/api/AuditLog/filters", TestContext.Current.CancellationToken)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await userClient.GetAsync("/api/User/me", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await userClient.GetAsync("/api/v1/User", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await userClient.GetAsync($"/api/v1/User/{(int)PrimaryKeys.UserTypes.Admin}", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await userClient.GetAsync("/api/v1/AuditLog", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await userClient.GetAsync("/api/v1/AuditLog/filters", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken)).StatusCode);
+    }
+
+    [Fact]
+    public async Task HealthCheck_ReturnsOkAndHealthy()
+    {
+        var client = _factory.CreateClient();
+
+        var v1Health = await client.GetAsync("/api/v1/health", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, v1Health.StatusCode);
+        Assert.Equal("Healthy", await v1Health.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
+
+        var legacyHealth = await client.GetAsync("/api/health", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, legacyHealth.StatusCode);
+    }
+
+    [Fact]
+    public async Task SetupStatus_And_SetupInitialAdmin_OnEmptyDatabase_CreatesAdminAndRejectsSecondSetup()
+    {
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
+            await dbContext.Database.ExecuteSqlRawAsync("""DELETE FROM "Users";""", TestContext.Current.CancellationToken);
+        }
+
+        var client = _factory.CreateClient();
+
+        var statusBefore = await client.GetFromJsonAsync<SetupStatusDto>("/api/v1/User/setup-status", TestContext.Current.CancellationToken);
+        Assert.NotNull(statusBefore);
+        Assert.True(statusBefore.SetupRequired);
+
+        var setupResponse = await client.PostAsJsonAsync(
+            "/api/v1/User/setup",
+            new SetupAdminDto
+            {
+                Username = "initialadmin",
+                FirstName = "Initial",
+                LastName = "Admin",
+                Password = "AdminPassword123!"
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.OK, setupResponse.StatusCode);
+        var session = await setupResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(session);
+        Assert.Equal("initialadmin", session.Username);
+        Assert.Equal("Admin", session.UserType);
+
+        var statusAfter = await client.GetFromJsonAsync<SetupStatusDto>("/api/v1/User/setup-status", TestContext.Current.CancellationToken);
+        Assert.NotNull(statusAfter);
+        Assert.False(statusAfter.SetupRequired);
+
+        var secondSetupResponse = await client.PostAsJsonAsync(
+            "/api/v1/User/setup",
+            new SetupAdminDto
+            {
+                Username = "secondadmin",
+                FirstName = "Second",
+                LastName = "Admin",
+                Password = "AdminPassword123!"
+            },
+            TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.Conflict, secondSetupResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task CreateUser_And_ServiceAccount_And_Logout_RevokesSession()
+    {
+        var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+
+        var createAliceResponse = await adminClient.PostAsJsonAsync(
+            "/api/v1/User",
+            new AddUserDto
+            {
+                Username = "alice",
+                FirstName = "Alice",
+                LastName = "Developer",
+                Password = "AlicePassword123!",
+                UserTypeId = (int)PrimaryKeys.UserTypes.User
+            },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Created, createAliceResponse.StatusCode);
+
+        var createBotResponse = await adminClient.PostAsJsonAsync(
+            "/api/v1/User",
+            new AddUserDto
+            {
+                Username = "ci-bot",
+                FirstName = "CI",
+                LastName = "Runner",
+                Password = "CiBotPassword123!",
+                UserTypeId = (int)PrimaryKeys.UserTypes.Service
+            },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Created, createBotResponse.StatusCode);
+
+        var botLogin = await LoginFromAsync("203.0.113.50", "ci-bot", "CiBotPassword123!");
+        Assert.Equal(HttpStatusCode.Forbidden, botLogin.StatusCode);
+
+        var aliceLogin = await LoginFromAsync("203.0.113.51", "alice", "AlicePassword123!");
+        Assert.Equal(HttpStatusCode.OK, aliceLogin.StatusCode);
+        var aliceSession = await aliceLogin.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(aliceSession);
+
+        var aliceClient = _factory.CreateClient();
+        aliceClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", aliceSession.Token);
+
+        var logoutResponse = await aliceClient.PostAsJsonAsync(
+            "/api/v1/User/logout",
+            new RefreshTokenDto { RefreshToken = aliceSession.RefreshToken },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, logoutResponse.StatusCode);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await aliceClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken)).StatusCode);
+
+        var refreshAfterLogout = await _factory.CreateClient().PostAsJsonAsync(
+            "/api/v1/User/refresh",
+            new RefreshTokenDto { RefreshToken = aliceSession.RefreshToken },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, refreshAfterLogout.StatusCode);
+    }
+
+    [Fact]
+    public async Task AuditLog_RecordsEventsAndFilters()
+    {
+        await LoginFromAsync("203.0.113.99", "User", "user");
+
+        var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+
+        var logsResponse = await adminClient.GetAsync("/api/v1/AuditLog?PageNumber=1&PageSize=50", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, logsResponse.StatusCode);
+
+        var filtersResponse = await adminClient.GetAsync("/api/v1/AuditLog/filters", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, filtersResponse.StatusCode);
+    }
+
+    [Fact]
+    public async Task ChangePassword_And_ResetPassword_UpdatePasswordAndRevokeExistingSessions()
+    {
+        var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+
+        var listResponse = await adminClient.GetAsync("/api/v1/User?PageNumber=1&PageSize=10&Search=User", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
+
+        var getByIdResponse = await adminClient.GetAsync($"/api/v1/User/{(int)PrimaryKeys.UserTypes.User}", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, getByIdResponse.StatusCode);
+
+        var userLogin = await LoginFromAsync("203.0.113.55", "User", "user");
+        var userSession = await userLogin.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(userSession);
+
+        var userClient = _factory.CreateClient();
+        userClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userSession.Token);
+
+        var wrongCurrentResponse = await userClient.PutAsJsonAsync(
+            "/api/v1/User/me/password",
+            new ChangePasswordDto { CurrentPassword = "wrong", Password = "new-password-123" },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, wrongCurrentResponse.StatusCode);
+
+        var changePasswordResponse = await userClient.PutAsJsonAsync(
+            "/api/v1/User/me/password",
+            new ChangePasswordDto { CurrentPassword = "user", Password = "new-password-123" },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, changePasswordResponse.StatusCode);
+
+        // Own session stays active after self-service password change
+        Assert.Equal(HttpStatusCode.OK, (await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken)).StatusCode);
+
+        // Login with new password works
+        Assert.Equal(HttpStatusCode.OK, (await LoginFromAsync("203.0.113.55", "User", "new-password-123")).StatusCode);
+
+        // Admin resets user's password back, which immediately revokes all active sessions for that user
+        var resetPasswordResponse = await adminClient.PutAsJsonAsync(
+            $"/api/v1/User/{(int)PrimaryKeys.UserTypes.User}/password",
+            new ResetPasswordDto { Password = "user" },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, resetPasswordResponse.StatusCode);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await LoginFromAsync("203.0.113.55", "User", "user")).StatusCode);
     }
 }

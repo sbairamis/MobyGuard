@@ -28,7 +28,7 @@ public class UserTypeControllerTests : IClassFixture<CustomWebApplicationFactory
     {
         var client = await _factory.CreateAuthenticatedClientAsync(userType);
 
-        var response = await client.GetAsync("/api/UserType", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync("/api/v1/UserType", TestContext.Current.CancellationToken);
 
         Assert.Equal(expectedStatus, response.StatusCode);
     }
@@ -41,7 +41,7 @@ public class UserTypeControllerTests : IClassFixture<CustomWebApplicationFactory
     {
         var client = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
 
-        var response = await client.GetAsync($"/api/UserType/{(int)systemUserType}", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync($"/api/v1/UserType/{(int)systemUserType}", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -55,11 +55,26 @@ public class UserTypeControllerTests : IClassFixture<CustomWebApplicationFactory
     {
         var client = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
 
-        var response = await client.GetAsync("/api/UserType/999", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync("/api/v1/UserType/999", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
 
         var problem = await response.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(ResponseMessages.UserTypeNotFound, problem!.Detail);
+    }
+
+    [Fact]
+    public async Task MutationEndpoints_AreDisabled_ReturnMethodNotAllowed()
+    {
+        var client = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+
+        var postResponse = await client.PostAsJsonAsync("/api/v1/UserType", new { type = "CustomRole" }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, postResponse.StatusCode);
+
+        var putResponse = await client.PutAsJsonAsync("/api/v1/UserType/1", new { type = "ModifiedAdmin" }, TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, putResponse.StatusCode);
+
+        var deleteResponse = await client.DeleteAsync("/api/v1/UserType/1", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, deleteResponse.StatusCode);
     }
 }

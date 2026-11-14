@@ -28,7 +28,7 @@ export default function UsersPage({ user: currentUser, notify }) {
 
   async function loadUserTypes() {
     try {
-      const types = await api.get('/api/UserType')
+      const types = await api.get('/api/v1/UserType')
       setUserTypes(types || [])
     } catch {}
   }
@@ -43,7 +43,7 @@ export default function UsersPage({ user: currentUser, notify }) {
       if (searchUsername.trim()) params.set('Username', searchUsername.trim())
       if (filterRoleId) params.set('UserTypeId', filterRoleId)
 
-      const res = await api.get(`/api/User?${params.toString()}`)
+      const res = await api.get(`/api/v1/User?${params.toString()}`)
       setUsers(res?.data || [])
       setTotalRecords(res?.totalRecords || 0)
     } catch (err) {
@@ -91,7 +91,7 @@ export default function UsersPage({ user: currentUser, notify }) {
     setSaving(true)
     try {
       if (modalMode === 'add') {
-        await api.post('/api/User', {
+        await api.post('/api/v1/User', {
           username: username.trim(),
           firstName: firstName.trim(),
           lastName: lastName.trim(),
@@ -100,7 +100,7 @@ export default function UsersPage({ user: currentUser, notify }) {
         })
         notify(`User "${username}" created.`, 'ok')
       } else if (modalMode === 'edit') {
-        await api.put(`/api/User/${selectedUser.id}`, {
+        await api.put(`/api/v1/User/${selectedUser.id}`, {
           username: username.trim(),
           firstName: firstName.trim(),
           lastName: lastName.trim(),
@@ -109,7 +109,7 @@ export default function UsersPage({ user: currentUser, notify }) {
         })
         notify(`User "${username}" updated.`, 'ok')
       } else if (modalMode === 'password') {
-        await api.put(`/api/User/${selectedUser.id}/password`, {
+        await api.put(`/api/v1/User/${selectedUser.id}/password`, {
           password
         })
         notify(`Password reset for "${selectedUser.username}".`, 'ok')
@@ -128,7 +128,7 @@ export default function UsersPage({ user: currentUser, notify }) {
       return
     }
     try {
-      await api.del(`/api/User/${u.id}`)
+      await api.del(`/api/v1/User/${u.id}`)
       notify(`User "${u.username}" deleted.`, 'ok')
       await loadUsers(pageNumber)
     } catch (err) {

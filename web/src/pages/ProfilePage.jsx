@@ -14,7 +14,7 @@ export default function ProfilePage({ notify }) {
   const [savingPassword, setSavingPassword] = useState(false)
 
   useEffect(() => {
-    api.get('/api/User/me')
+    api.get('/api/v1/User/me')
       .then((me) => {
         if (me) {
           setUsername(me.username)
@@ -31,7 +31,7 @@ export default function ProfilePage({ notify }) {
     e.preventDefault()
     setSavingProfile(true)
     try {
-      await api.put('/api/User/me', {
+      await api.put('/api/v1/User/me', {
         firstName: firstName.trim(),
         lastName: lastName.trim()
       })
@@ -47,7 +47,7 @@ export default function ProfilePage({ notify }) {
     e.preventDefault()
     setSavingPassword(true)
     try {
-      await api.put('/api/User/me/password', {
+      await api.put('/api/v1/User/me/password', {
         currentPassword,
         password: newPassword
       })

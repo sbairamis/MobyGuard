@@ -48,7 +48,7 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     {
         var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
         var response = await adminClient.PostAsJsonAsync(
-            "/api/RepositoryPermission",
+            "/api/v1/RepositoryPermission",
             new AddRepositoryPermissionDto
             {
                 UserId = userId,
@@ -83,7 +83,7 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     {
         var client = CreateBasicAuthClient("User", "user");
 
-        var response = await client.GetAsync("/api/Token?service=registry", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync("/api/v1/Token?service=registry", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
@@ -134,7 +134,7 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
 
         // Request both pull and push on a pull-only repository
         var response = await client.GetAsync(
-            "/api/Token?service=registry&scope=repository:mobyguard/backend-api:pull,push",
+            "/api/v1/Token?service=registry&scope=repository:mobyguard/backend-api:pull,push",
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -164,7 +164,7 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         var client = CreateBasicAuthClient("User", "user");
 
         var response = await client.GetAsync(
-            "/api/Token?service=registry&scope=repository:mobyguard/secret-repo:pull",
+            "/api/v1/Token?service=registry&scope=repository:mobyguard/secret-repo:pull",
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -187,7 +187,7 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         var client = CreateBasicAuthClient("Service", "service");
 
         var response = await client.GetAsync(
-            "/api/Token?service=registry&scope=repository:mobyguard/iot-gateway:pull,push&scope=repository:external/other:pull",
+            "/api/v1/Token?service=registry&scope=repository:mobyguard/iot-gateway:pull,push&scope=repository:external/other:pull",
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -213,7 +213,7 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         var client = CreateBasicAuthClient("Admin", "admin");
 
         var response = await client.GetAsync(
-            "/api/Token?service=registry&scope=repository:any/repo:pull,push,delete&scope=registry:catalog:*",
+            "/api/v1/Token?service=registry&scope=repository:any/repo:pull,push,delete&scope=registry:catalog:*",
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -238,7 +238,7 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     {
         var client = CreateBasicAuthClient("User", "wrong-password");
 
-        var response = await client.GetAsync("/api/Token?service=registry", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync("/api/v1/Token?service=registry", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
 
@@ -251,7 +251,7 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     {
         var client = _factory.CreateClient();
 
-        var response = await client.GetAsync("/api/Token?service=registry", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync("/api/v1/Token?service=registry", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
@@ -262,11 +262,11 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
         for (var i = 0; i < Variables.LoginMaxRetries; i++)
         {
             using var badClient = CreateBasicAuthClient("User", "wrong", "203.0.113.55");
-            await badClient.GetAsync("/api/Token?service=registry", TestContext.Current.CancellationToken);
+            await badClient.GetAsync("/api/v1/Token?service=registry", TestContext.Current.CancellationToken);
         }
 
         using var validClient = CreateBasicAuthClient("User", "user", "203.0.113.55");
-        var response = await validClient.GetAsync("/api/Token?service=registry", TestContext.Current.CancellationToken);
+        var response = await validClient.GetAsync("/api/v1/Token?service=registry", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
     }
@@ -276,7 +276,7 @@ public class TokenControllerTests : IClassFixture<CustomWebApplicationFactory>, 
     {
         var client = _factory.CreateClient();
 
-        var response = await client.GetAsync("/api/Token/jwks", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync("/api/v1/Token/jwks", TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 

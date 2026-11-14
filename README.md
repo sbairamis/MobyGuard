@@ -14,6 +14,7 @@
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19" />
   <img src="https://img.shields.io/badge/Docker-Registry_v2%2Fv3-2496ED?logo=docker&logoColor=white" alt="Docker Registry" />
   <img src="https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&logoColor=white" alt="SQLite" />
+  <img src="https://img.shields.io/badge/coverage-85.6%25-brightgreen" alt="Code Coverage" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
 </p>
 
@@ -45,7 +46,7 @@ Organizations deploying private Docker registries typically face two limitations
 * **Docker v2 and OCI Token Authentication**:
   * Fully compliant with the [Docker Registry v2 Bearer Token Specification](https://distribution.github.io/distribution/spec/auth/token/).
   * Compatible with standard `docker login`, `docker pull`, and `docker push` workflows.
-  * Asymmetric ECDSA P-256 (`ES256`) token signing with a public JWKS endpoint (`/api/Token/jwks`).
+  * Asymmetric ECDSA P-256 (`ES256`) token signing with a public JWKS endpoint (`/api/v1/Token/jwks`).
 
 * **Repository Access Control (ACL)**:
   * Per-user policy scoping supporting exact matches (`team-a/backend`), namespace wildcards (`team-a/*`), or global access (`*`).
@@ -118,7 +119,7 @@ Clean sign-in interface with ECDSA token authentication and administrative onboa
                              └──────────┬─────────▲──────────┘
                                         │         │
                      1. Basic Auth      │         │ 2. Issue Signed JWT
-                     GET /api/Token     │         │    (Bearer Token)
+                     GET /api/v1/Token  │         │    (Bearer Token)
                                         ▼         │
                      ┌────────────────────────────┴──┐
                      │    Reverse Proxy / Gateway    │
@@ -138,7 +139,7 @@ Clean sign-in interface with ECDSA token authentication and administrative onboa
                        └───────────┘           └───────────┘
 ```
 
-* **Step 1 (Token Request)**: The Docker client requests an access token from MobyGuard (`/api/Token`) using HTTP Basic authentication.
+* **Step 1 (Token Request)**: The Docker client requests an access token from MobyGuard (`/api/v1/Token`) using HTTP Basic authentication.
 * **Step 2 (Token Issuance)**: MobyGuard evaluates the user's repository permissions in SQLite and returns a cryptographically signed ECDSA `ES256` Bearer JWT.
 * **Step 3 (Layer Streaming)**: The Docker client presents the Bearer token directly to Docker Registry (`/v2/`), which verifies the signature and streams image layer blobs directly to storage.
 * **Control Plane Isolation**: MobyGuard handles authentication, authorization policy evaluation, user management, and dashboard operations without bottlenecking image layer transfers.
@@ -168,7 +169,7 @@ chmod 644 certs/*
 * **`certs/registry-auth.key` (Private Key)**:
   * Kept strictly confidential by MobyGuard.
   * Mounted into the MobyGuard container at `/app/certs/registry-auth.key`.
-  * Used exclusively by MobyGuard's `/api/Token` endpoint to sign outgoing Bearer JWTs granted to Docker CLI clients.
+  * Used exclusively by MobyGuard's `/api/v1/Token` endpoint to sign outgoing Bearer JWTs granted to Docker CLI clients.
 * **`certs/registry-auth.crt` (Public Certificate)**:
   * Contains the public key and issuer identity (`CN=mobyguard-token-issuer`).
   * Mounted into both MobyGuard and the Docker Registry container.
@@ -190,7 +191,7 @@ To configure Docker Registry (or CNCF Distribution) to authenticate via MobyGuar
 environment:
   REGISTRY_STORAGE_DELETE_ENABLED: "true"
   REGISTRY_AUTH: token
-  REGISTRY_AUTH_TOKEN_REALM: https://registry.example.com/api/Token
+  REGISTRY_AUTH_TOKEN_REALM: https://registry.example.com/api/v1/Token
   REGISTRY_AUTH_TOKEN_SERVICE: registry
   REGISTRY_AUTH_TOKEN_ISSUER: mobyguard-token-issuer
   REGISTRY_AUTH_TOKEN_ROOTCERTBUNDLE: /certs/registry-auth.crt
@@ -217,7 +218,7 @@ services:
       RegistryTokenOptions__RegistryUrl: ${REGISTRY_URL}
       JwtOptions__SecurityKey: ${JWT_SECURITY_KEY}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5090/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5090/api/v1/health"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -330,7 +331,7 @@ For headless CI/CD systems (GitHub Actions, GitLab CI, Drone, Jenkins):
 * **Database**: [SQLite](https://www.sqlite.org/) for embedded relational persistence, policy storage, and hashed refresh tokens.
 * **Cache**: Built-in .NET `IMemoryCache` for short-lived JWT revocation (`jti`) and brute-force lockout counters.
 * **Token Signer**: Cryptographic ECDSA `ES256` token signing.
-* **Testing**: Integration testing with xUnit v3 and `WebApplicationFactory`.
+* **Testing**: Integration testing with xUnit v3, `WebApplicationFactory`, and `Microsoft.Testing.Extensions.CodeCoverage` (~85.6% line coverage).
 
 ---
 

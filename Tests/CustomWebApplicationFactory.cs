@@ -57,11 +57,16 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         File.WriteAllText(_keyPath, ecdsa.ExportPkcs8PrivateKeyPem());
     }
 
+    public FakeDockerRegistryHandler RegistryHandler { get; } = new();
+
     public async Task ResetDatabaseAsync()
     {
+        RegistryHandler.Reset();
+
         using var scope = Services.CreateScope();
 
         scope.ServiceProvider.GetRequiredService<SessionCacheService>().ClearAll();
+        scope.ServiceProvider.GetRequiredService< Microsoft.Extensions.Caching.Memory.IMemoryCache>().Remove("registry:catalog:repositories");
 
         var dbContext = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
 
@@ -137,7 +142,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         }
 
         var response = await client.PostAsJsonAsync(
-            "/api/User/login",
+            "/api/v1/User/login",
             new LoginUserDto { Username = username, Password = username.ToLowerInvariant() },
             TestContext.Current.CancellationToken);
 
@@ -167,6 +172,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             {
                 options.UseSqlite($"Data Source={_dbPath}");
             });
+
+            services.AddHttpClient("DockerRegistry")
+                .ConfigurePrimaryHttpMessageHandler(() => RegistryHandler);
         });
     }
 

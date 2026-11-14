@@ -59,7 +59,7 @@ export default function App() {
   useEffect(() => {
     async function init() {
       try {
-        const status = await api.get('/api/User/setup-status')
+        const status = await api.get('/api/v1/User/setup-status')
         if (status?.setupRequired) {
           setSetupRequired(true)
           saveSession(null)
@@ -69,7 +69,7 @@ export default function App() {
         }
         const existing = loadSession()
         if (existing?.token) {
-          await api.get('/api/User/me')
+          await api.get('/api/v1/User/me')
           setUser(existing)
         }
       } catch {
@@ -92,7 +92,7 @@ export default function App() {
     const existing = loadSession()
     if (existing?.token) {
       try {
-        await api.post('/api/User/logout', { refreshToken: existing.refreshToken })
+        await api.post('/api/v1/User/logout', { refreshToken: existing.refreshToken })
       } catch {}
     }
     saveSession(null)

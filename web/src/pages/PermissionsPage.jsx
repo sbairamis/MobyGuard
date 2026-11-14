@@ -29,7 +29,7 @@ export default function PermissionsPage({ user, notify }) {
     setLoading(true)
     try {
       if (!isAdmin) {
-        const myPerms = await api.get('/api/RepositoryPermission/me')
+        const myPerms = await api.get('/api/v1/RepositoryPermission/me')
         setPermissions(myPerms || [])
         setTotalRecords(myPerms?.length || 0)
       } else {
@@ -40,7 +40,7 @@ export default function PermissionsPage({ user, notify }) {
         if (filterUsername.trim()) params.set('Username', filterUsername.trim())
         if (filterPattern.trim()) params.set('RepositoryPattern', filterPattern.trim())
 
-        const res = await api.get(`/api/RepositoryPermission?${params.toString()}`)
+        const res = await api.get(`/api/v1/RepositoryPermission?${params.toString()}`)
         setPermissions(res?.data || [])
         setTotalRecords(res?.totalRecords || 0)
       }
@@ -54,7 +54,7 @@ export default function PermissionsPage({ user, notify }) {
   async function loadUsersForDropdown() {
     if (!isAdmin) return
     try {
-      const res = await api.get('/api/User?PageNumber=1&PageSize=100')
+      const res = await api.get('/api/v1/User?PageNumber=1&PageSize=100')
       const nonAdmins = (res?.data || []).filter((u) => u.userType !== 'Admin')
       setUsersList(nonAdmins)
     } catch {}
@@ -90,7 +90,7 @@ export default function PermissionsPage({ user, notify }) {
     setSaving(true)
     try {
       if (editingRule) {
-        await api.put(`/api/RepositoryPermission/${editingRule.id}`, {
+        await api.put(`/api/v1/RepositoryPermission/${editingRule.id}`, {
           repositoryPattern: formPattern.trim().toLowerCase(),
           canPull: formPull,
           canPush: formPush,
@@ -98,7 +98,7 @@ export default function PermissionsPage({ user, notify }) {
         })
         notify('Permission policy updated.', 'ok')
       } else {
-        await api.post('/api/RepositoryPermission', {
+        await api.post('/api/v1/RepositoryPermission', {
           userId: Number(formUserId),
           repositoryPattern: formPattern.trim().toLowerCase(),
           canPull: formPull,
@@ -121,7 +121,7 @@ export default function PermissionsPage({ user, notify }) {
       return
     }
     try {
-      await api.del(`/api/RepositoryPermission/${rule.id}`)
+      await api.del(`/api/v1/RepositoryPermission/${rule.id}`)
       notify('Permission policy deleted.', 'ok')
       await loadPermissions(pageNumber)
     } catch (err) {

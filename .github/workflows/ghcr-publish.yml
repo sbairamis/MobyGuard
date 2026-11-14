@@ -48,8 +48,11 @@ jobs:
       - name: Build solution
         run: dotnet build MobyGuard.sln --configuration Release --no-restore
 
-      - name: Run tests
-        run: dotnet test --solution MobyGuard.sln --configuration Release --no-build --no-ansi --output Detailed
+      - name: Run tests with code coverage
+        run: dotnet test --solution MobyGuard.sln --configuration Release --no-build --no-ansi --output Detailed --coverage --coverage-output-format cobertura --coverage-output coverage.cobertura.xml --coverage-settings Tests/coverage.settings.xml
+
+      - name: Report code coverage
+        run: python3 scripts/coverage-report.py --min-line-coverage 80
 
       - name: Set up Node.js
         uses: actions/setup-node@v7

@@ -15,7 +15,7 @@ export default function AuditLogsPage({ notify }) {
 
   async function loadFilters() {
     try {
-      const res = await api.get('/api/AuditLog/filters')
+      const res = await api.get('/api/v1/AuditLog/filters')
       if (res?.valuesStr?.description) {
         setDescriptions(Object.keys(res.valuesStr.description))
       }
@@ -34,7 +34,7 @@ export default function AuditLogsPage({ notify }) {
         params.set('ValueStr', valueStr.trim())
       }
 
-      const res = await api.get(`/api/AuditLog?${params.toString()}`)
+      const res = await api.get(`/api/v1/AuditLog?${params.toString()}`)
       setLogs(res?.data || [])
       setTotalRecords(res?.totalRecords || 0)
     } catch (err) {

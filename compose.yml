@@ -13,7 +13,7 @@ services:
       RegistryTokenOptions__RegistryUrl: ${REGISTRY_URL}
       JwtOptions__SecurityKey: ${JWT_SECURITY_KEY}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5090/api/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5090/api/v1/health"]
       interval: 10s
       timeout: 5s
       retries: 5
