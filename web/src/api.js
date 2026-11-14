@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'mobyguard_session'
-export const DASHBOARD_VERSION = 'v1.0.7'
+export const DASHBOARD_VERSION = 'v1.0.8'
 
 const ERROR_MESSAGES = {
   _invalidCredentials: 'Invalid username or password.',
@@ -11,6 +11,7 @@ const ERROR_MESSAGES = {
   _userAlreadyExists: 'A user with that username already exists.',
   _cannotDeleteYourself: 'You cannot delete your own account.',
   _cannotChangeOwnTypeOrStatus: 'You cannot demote or deactivate your own admin account.',
+  _cannotModifyRootAdmin: 'The initial root admin account cannot be deleted, disabled, demoted, or modified by another admin.',
   _invalidCurrentPassword: 'Your current password is incorrect.',
   _passwordPolicyViolation: 'Password must be 8–128 characters and include uppercase, lowercase, number, and symbol (no spaces).',
   _passwordBlacklisted: 'This password is on the common password blacklist or contains your username. Choose a stronger password.',
@@ -26,6 +27,12 @@ const ERROR_MESSAGES = {
   _registryRepositoryAccessDenied: 'You do not have permission for this repository operation.',
   _registryManifestNotFound: 'Manifest or tag not found in the Docker Registry.',
   _registryUpstreamError: 'Could not reach the upstream Docker Registry container. Check RegistryUrl in appsettings.json.',
+  _retentionPolicyNotFound: 'Retention policy not found.',
+  _retentionPolicyAlreadyExists: 'A retention policy with that name already exists.',
+  _invalidRetentionPolicyRule: 'Specify a policy name and at least one retention rule (Keep Last N Tags >= 1 or Max Age Days >= 1).',
+  _webhookSubscriptionNotFound: 'Webhook subscription not found.',
+  _webhookSubscriptionAlreadyExists: 'A webhook subscription with that name already exists.',
+  _invalidWebhookSubscription: 'Provide a valid name, provider (Slack, Discord, or Teams), HTTP/HTTPS URL, and at least one event trigger.',
   _internalServerError: 'An unexpected server error occurred.'
 }
 

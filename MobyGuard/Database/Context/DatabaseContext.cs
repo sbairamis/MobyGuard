@@ -9,8 +9,10 @@ public class DatabaseContext(DbContextOptions<DatabaseContext> options) : DbCont
     public DbSet<AuditLog> AuditLogs { get; set; }
     public DbSet<RefreshToken> RefreshTokens { get; set; }
     public DbSet<RepositoryPermission> RepositoryPermissions { get; set; }
+    public DbSet<RetentionPolicy> RetentionPolicies { get; set; }
     public DbSet<User> Users { get; set; }
     public DbSet<UserType> UserTypes { get; set; }
+    public DbSet<WebhookSubscription> WebhookSubscriptions { get; set; }
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -47,6 +49,18 @@ public class DatabaseContext(DbContextOptions<DatabaseContext> options) : DbCont
             entity.HasIndex(log => log.CreatedAt);
             entity.HasIndex(log => log.Username);
             entity.HasIndex(log => log.Description);
+        });
+
+        modelBuilder.Entity<RetentionPolicy>(entity =>
+        {
+            entity.Property(p => p.Name).UseCollation("NOCASE");
+            entity.HasIndex(p => p.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<WebhookSubscription>(entity =>
+        {
+            entity.Property(w => w.Name).UseCollation("NOCASE");
+            entity.HasIndex(w => w.Name).IsUnique();
         });
     }
 }

@@ -18,6 +18,7 @@ using MobyGuard.Helpers;
 using MobyGuard.Pagination;
 using MobyGuard.Repos;
 using MobyGuard.Seeders;
+using MobyGuard.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -64,12 +65,21 @@ builder.Services.AddHttpClient("DockerRegistry", client =>
     client.Timeout = TimeSpan.FromSeconds(15);
 });
 
+builder.Services.AddHttpClient("OutboundWebhook", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
+
 builder.Services.AddScoped<AuditLogRepository>();
+builder.Services.AddScoped<OutboundWebhookDispatcher>();
 builder.Services.AddScoped<RegistryRepository>();
 builder.Services.AddScoped<RepositoryPermissionRepository>();
+builder.Services.AddScoped<RetentionPolicyRepository>();
+builder.Services.AddHostedService<RetentionPolicySchedulerService>();
 builder.Services.AddScoped<TokenRepository>();
 builder.Services.AddScoped<UserRepository>();
 builder.Services.AddScoped<UserTypeRepository>();
+builder.Services.AddScoped<WebhookSubscriptionRepository>();
 
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseHealthCheck>("Database")

@@ -25,6 +25,7 @@ public class UserRepository(
     ILogger<UserRepository> logger,
     SessionService sessionService)
 {
+    private const int RootAdminUserId = 1;
     private readonly JwtOptions _jwtOptions = jwtOptions.Value;
 
     public async Task<Result<SetupStatusDto>> GetSetupStatus()
@@ -35,7 +36,7 @@ public class UserRepository(
             return Result<SetupStatusDto>.Success(new SetupStatusDto
             {
                 SetupRequired = !hasUsers,
-                ApiVersion = "v1.0.7"
+                ApiVersion = "v1.0.8"
             });
         }
         catch (Exception ex)
@@ -411,6 +412,12 @@ public class UserRepository(
                 return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.CannotChangeOwnTypeOrStatus);
             }
 
+            // Protect the initial bootstrap root admin (Id == 1) from being demoted, disabled, or modified by other admins.
+            if (user.Id == RootAdminUserId && (callerId != RootAdminUserId || updateUserDto.UserTypeId != user.UserTypeId || !updateUserDto.IsActive))
+            {
+                return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.CannotModifyRootAdmin);
+            }
+
             if (updateUserDto.Username != user.Username
                 && await context.Users.AnyAsync(other => other.Id != user.Id && other.Username == updateUserDto.Username))
             {
@@ -487,7 +494,7 @@ public class UserRepository(
         }
     }
 
-    public async Task<Result> ResetPassword(int id, ResetPasswordDto resetPasswordDto)
+    public async Task<Result> ResetPassword(int id, ResetPasswordDto resetPasswordDto, int callerId)
     {
         try
         {
@@ -496,6 +503,11 @@ public class UserRepository(
             if (user is null)
             {
                 return Result.Failure(RepositoryStatus.NotFound, ResponseMessages.UserNotFound);
+            }
+
+            if (user.Id == RootAdminUserId && callerId != RootAdminUserId)
+            {
+                return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.CannotModifyRootAdmin);
             }
 
             var (isValidPassword, passwordError) = PasswordPolicyValidator.Validate(resetPasswordDto.Password, user.Username);
@@ -530,6 +542,11 @@ public class UserRepository(
             if (user.Id == callerId)
             {
                 return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.CannotDeleteYourself);
+            }
+
+            if (user.Id == RootAdminUserId)
+            {
+                return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.CannotModifyRootAdmin);
             }
 
             var permissions = await context.RepositoryPermissions

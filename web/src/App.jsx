@@ -3,6 +3,8 @@ import { api, DASHBOARD_VERSION, loadSession, saveSession } from './api'
 import Icon from './components/Icon'
 import AuthPage from './pages/AuthPage'
 import RegistryPage from './pages/RegistryPage'
+import RetentionPoliciesPage from './pages/RetentionPoliciesPage'
+import WebhooksPage from './pages/WebhooksPage'
 import PermissionsPage from './pages/PermissionsPage'
 import UsersPage from './pages/UsersPage'
 import AuditLogsPage from './pages/AuditLogsPage'
@@ -11,7 +13,7 @@ import ProfilePage from './pages/ProfilePage'
 export default function App() {
   const [ready, setReady] = useState(false)
   const [setupRequired, setSetupRequired] = useState(false)
-  const [apiVersion, setApiVersion] = useState('v1.0.7')
+  const [apiVersion, setApiVersion] = useState('v1.0.8')
   const [user, setUser] = useState(() => loadSession())
   const [route, setRoute] = useState(() => window.location.hash.slice(1) || '/')
   const [theme, setTheme] = useState(() => localStorage.getItem('mobyguard_theme') || 'dark')
@@ -31,16 +33,29 @@ export default function App() {
   }, [theme])
 
   useEffect(() => {
+    let iconLink = document.querySelector("link[rel='icon']")
+    if (!iconLink) {
+      iconLink = document.createElement('link')
+      iconLink.rel = 'icon'
+      iconLink.type = 'image/png'
+      document.head.appendChild(iconLink)
+    }
+    if (!iconLink.href.includes('favicon.png')) {
+      iconLink.href = '/favicon.png?v=1.0.8'
+    }
+
     if (!user || setupRequired) {
-      document.title = setupRequired ? 'Setup Admin — MobyGuard' : 'Sign In — MobyGuard'
+      document.title = setupRequired ? 'Setup Admin | MobyGuard' : 'Sign In | MobyGuard'
       return
     }
     const titles = {
-      '/': 'Images & Tags — MobyGuard',
-      '/permissions': 'Policies — MobyGuard',
-      '/users': 'Users & Roles — MobyGuard',
-      '/audit': 'Audit Logs — MobyGuard',
-      '/profile': 'My Account — MobyGuard'
+      '/': 'Images & Tags | MobyGuard',
+      '/retention': 'Retention Policies | MobyGuard',
+      '/webhooks': 'Webhooks | MobyGuard',
+      '/permissions': 'Policies | MobyGuard',
+      '/users': 'Users | MobyGuard',
+      '/audit': 'Audit Logs | MobyGuard',
+      '/profile': 'My Account | MobyGuard'
     }
     const matched = Object.keys(titles).find((p) => p !== '/' && route.startsWith(p))
     document.title = titles[matched] || titles['/'] || 'MobyGuard'
@@ -129,11 +144,17 @@ export default function App() {
   const navItems = [
     { section: 'Registry' },
     { path: '/', label: 'Images & Tags', icon: 'box' },
+    ...(isAdmin
+      ? [
+          { path: '/retention', label: 'Retention Policies', icon: 'layers' },
+          { path: '/webhooks', label: 'Webhooks', icon: 'bell' }
+        ]
+      : []),
     { section: 'Access Control' },
     { path: '/permissions', label: 'Policies', icon: 'shield' },
     ...(isAdmin
       ? [
-          { path: '/users', label: 'Users & Roles', icon: 'users' },
+          { path: '/users', label: 'Users', icon: 'users' },
           { path: '/audit', label: 'Audit Logs', icon: 'logs' }
         ]
       : []),
@@ -142,7 +163,9 @@ export default function App() {
   ]
 
   let PageComponent = RegistryPage
-  if (route.startsWith('/permissions')) PageComponent = PermissionsPage
+  if (isAdmin && route.startsWith('/retention')) PageComponent = RetentionPoliciesPage
+  else if (isAdmin && route.startsWith('/webhooks')) PageComponent = WebhooksPage
+  else if (route.startsWith('/permissions')) PageComponent = PermissionsPage
   else if (isAdmin && route.startsWith('/users')) PageComponent = UsersPage
   else if (isAdmin && route.startsWith('/audit')) PageComponent = AuditLogsPage
   else if (route.startsWith('/profile')) PageComponent = ProfilePage
@@ -182,7 +205,7 @@ export default function App() {
         <div style={{ padding: '10px 14px', borderTop: '1px solid var(--border)', fontSize: 11.5 }} className="muted">
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <span>API Version</span>
-            <span className="mono">{apiVersion} (v1)</span>
+            <span className="mono">{apiVersion}</span>
           </div>
           <div className="row" style={{ justifyContent: 'space-between', marginTop: 3 }}>
             <span>Dashboard</span>
@@ -214,7 +237,7 @@ export default function App() {
       </aside>
 
       <main>
-        <PageComponent user={user} apiVersion={apiVersion} notify={notify} />
+        <PageComponent user={user} notify={notify} />
       </main>
 
       <ToastStack toasts={toasts} />

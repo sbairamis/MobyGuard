@@ -11,8 +11,8 @@ export default function UsersPage({ user: currentUser, notify }) {
   const [pageNumber, setPageNumber] = useState(1)
   const [pageSize] = useState(15)
 
-  const [searchUsername, setSearchUsername] = useState('')
-  const [filterRoleId, setFilterRoleId] = useState('')
+  const [searchBy, setSearchBy] = useState('0')
+  const [filterValue, setFilterValue] = useState('')
   const [loading, setLoading] = useState(true)
 
   const [modalMode, setModalMode] = useState(null) // 'add' | 'edit' | 'password'
@@ -31,15 +31,21 @@ export default function UsersPage({ user: currentUser, notify }) {
     } catch {}
   }
 
-  async function loadUsers(page = pageNumber) {
+  async function loadUsers(page = pageNumber, overrideSearchBy = searchBy, overrideValue = filterValue) {
     setLoading(true)
     try {
       const params = new URLSearchParams({
         PageNumber: String(page),
         PageSize: String(pageSize)
       })
-      if (searchUsername.trim()) params.set('Username', searchUsername.trim())
-      if (filterRoleId) params.set('UserTypeId', filterRoleId)
+      const trimmed = overrideValue.trim()
+      if (overrideSearchBy === 'username' && trimmed) {
+        params.set('Username', trimmed)
+      } else if (overrideSearchBy === 'role' && trimmed) {
+        params.set('UserTypeId', trimmed)
+      } else if (overrideSearchBy === 'status' && trimmed) {
+        params.set('IsActive', trimmed)
+      }
 
       const res = await api.get(`/api/v1/User?${params.toString()}`)
       setUsers(res?.data || [])
@@ -132,7 +138,7 @@ export default function UsersPage({ user: currentUser, notify }) {
     <div className="page">
       <div className="page-head">
         <div>
-          <h1>Users & Service Accounts</h1>
+          <h1>Users</h1>
         </div>
         {isAdmin && (
           <button className="primary" onClick={openAddModal}>
@@ -151,38 +157,68 @@ export default function UsersPage({ user: currentUser, notify }) {
             loadUsers(1)
           }}
         >
-          <input
-            type="text"
-            placeholder="Search by username…"
-            value={searchUsername}
-            onChange={(e) => setSearchUsername(e.target.value)}
-            style={{ width: 230 }}
-          />
           <select
-            value={filterRoleId}
-            onChange={(e) => setFilterRoleId(e.target.value)}
-            style={{ width: 170 }}
+            value={searchBy}
+            onChange={(e) => {
+              setSearchBy(e.target.value)
+              setFilterValue('')
+            }}
+            style={{ width: 175 }}
           >
-            <option value="">All Roles</option>
-            {userTypes.map((ut) => (
-              <option key={ut.id} value={ut.id}>{ut.type}</option>
-            ))}
+            <option value="0">All Fields (No Filter)</option>
+            <option value="username">By Username</option>
+            <option value="role">By Role</option>
+            <option value="status">By Status</option>
           </select>
+
+          {searchBy === 'role' ? (
+            <select
+              value={filterValue}
+              onChange={(e) => setFilterValue(e.target.value)}
+              style={{ width: 220 }}
+            >
+              <option value="">Select role…</option>
+              {userTypes.map((ut) => (
+                <option key={ut.id} value={ut.id}>{ut.type}</option>
+              ))}
+            </select>
+          ) : searchBy === 'status' ? (
+            <select
+              value={filterValue}
+              onChange={(e) => setFilterValue(e.target.value)}
+              style={{ width: 220 }}
+            >
+              <option value="">Select status…</option>
+              <option value="true">Active</option>
+              <option value="false">Disabled</option>
+            </select>
+          ) : (
+            <input
+              type="text"
+              disabled={searchBy === '0'}
+              placeholder={searchBy === '0' ? 'Select a filter field first…' : 'Enter username…'}
+              value={filterValue}
+              onChange={(e) => setFilterValue(e.target.value)}
+              style={{ width: 260 }}
+            />
+          )}
+
           <button type="submit">
-            <Icon name="search" size={14} /> Filter
+            <Icon name="search" size={14} /> Search
           </button>
-          {(searchUsername || filterRoleId) && (
+
+          {searchBy !== '0' && (
             <button
               type="button"
               className="ghost"
               onClick={() => {
-                setSearchUsername('')
-                setFilterRoleId('')
+                setSearchBy('0')
+                setFilterValue('')
                 setPageNumber(1)
-                setTimeout(() => loadUsers(1), 0)
+                loadUsers(1, '0', '')
               }}
             >
-              Reset
+              Clear
             </button>
           )}
         </form>
@@ -223,7 +259,7 @@ export default function UsersPage({ user: currentUser, notify }) {
                       <span className={`badge ${
                         u.userType === 'Admin' ? 'accent' : u.userType === 'Service' ? 'purple' : 'info'
                       }`}>
-                        {u.userType}
+                        {u.id === 1 && u.userType === 'Admin' ? 'Root Admin' : u.userType}
                       </span>
                     </td>
                     <td>
@@ -235,13 +271,17 @@ export default function UsersPage({ user: currentUser, notify }) {
                     {isAdmin && (
                       <td className="num">
                         <div className="actions">
-                          <button className="sm" title="Edit user" onClick={() => openEditModal(u)}>
-                            <Icon name="edit" size={13} /> Edit
-                          </button>
-                          <button className="sm" title="Reset password" onClick={() => openPasswordModal(u)}>
-                            <Icon name="key" size={13} /> Password
-                          </button>
-                          {u.id !== currentUser?.id && (
+                          {(u.id !== 1 || currentUser?.id === 1) && (
+                            <>
+                              <button className="sm" title="Edit user" onClick={() => openEditModal(u)}>
+                                <Icon name="edit" size={13} /> Edit
+                              </button>
+                              <button className="sm" title="Reset password" onClick={() => openPasswordModal(u)}>
+                                <Icon name="key" size={13} /> Password
+                              </button>
+                            </>
+                          )}
+                          {u.id !== currentUser?.id && u.id !== 1 && (
                             <button className="danger sm" title="Delete user" onClick={() => handleDeleteUser(u)}>
                               <Icon name="trash" size={13} />
                             </button>
@@ -331,7 +371,11 @@ export default function UsersPage({ user: currentUser, notify }) {
                   </label>
                   <label className="field">
                     Role
-                    <select value={userTypeId} onChange={(e) => setUserTypeId(e.target.value)}>
+                    <select
+                      value={userTypeId}
+                      onChange={(e) => setUserTypeId(e.target.value)}
+                      disabled={modalMode === 'edit' && (selectedUser?.id === 1 || selectedUser?.id === currentUser?.id)}
+                    >
                       {userTypes.map((ut) => (
                         <option key={ut.id} value={ut.id}>{ut.type}</option>
                       ))}
@@ -360,6 +404,7 @@ export default function UsersPage({ user: currentUser, notify }) {
                     <input
                       type="checkbox"
                       checked={isActive}
+                      disabled={selectedUser?.id === 1 || selectedUser?.id === currentUser?.id}
                       onChange={(e) => setIsActive(e.target.checked)}
                       style={{ width: 16, height: 16 }}
                     />

@@ -530,4 +530,75 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, resetBannedRes.StatusCode);
     }
+
+    [Fact]
+    public async Task RootAdmin_IsProtectedFromSecondaryAdmin_WhileRootAdminCanManageSecondaryAdmins()
+    {
+        var rootAdminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+
+        // 1. Root admin (Id == 1) creates a secondary admin
+        var createSecondAdminRes = await rootAdminClient.PostAsJsonAsync(
+            "/api/v1/User",
+            new AddUserDto
+            {
+                Username = "secondary_admin",
+                Password = "SecAdmin!Pass2026#",
+                UserTypeId = (int)PrimaryKeys.UserTypes.Admin
+            },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Created, createSecondAdminRes.StatusCode);
+        var secondAdmin = await createSecondAdminRes.Content.ReadFromJsonAsync<UserDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(secondAdmin);
+
+        var secondLoginRes = await LoginFromAsync("203.0.113.99", "secondary_admin", "SecAdmin!Pass2026#");
+        var secondSession = await secondLoginRes.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(secondSession);
+
+        var secondAdminClient = _factory.CreateClient();
+        secondAdminClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", secondSession.Token);
+
+        // 2. Secondary admin cannot delete the root admin (Id == 1)
+        var deleteRootRes = await secondAdminClient.DeleteAsync("/api/v1/User/1", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Conflict, deleteRootRes.StatusCode);
+        var deleteRootProblem = await deleteRootRes.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(ResponseMessages.CannotModifyRootAdmin, deleteRootProblem!.Detail);
+
+        // 3. Secondary admin cannot update, demote, or disable the root admin (Id == 1)
+        var updateRootRes = await secondAdminClient.PutAsJsonAsync(
+            "/api/v1/User/1",
+            new UpdateUserDto
+            {
+                Username = "hijacked_root",
+                UserTypeId = (int)PrimaryKeys.UserTypes.User,
+                IsActive = false
+            },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Conflict, updateRootRes.StatusCode);
+        var updateRootProblem = await updateRootRes.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(ResponseMessages.CannotModifyRootAdmin, updateRootProblem!.Detail);
+
+        // 4. Secondary admin cannot reset the root admin's password
+        var resetRootRes = await secondAdminClient.PutAsJsonAsync(
+            "/api/v1/User/1/password",
+            new ResetPasswordDto { Password = "Hijacked!Pass2026#" },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Conflict, resetRootRes.StatusCode);
+        var resetRootProblem = await resetRootRes.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(ResponseMessages.CannotModifyRootAdmin, resetRootProblem!.Detail);
+
+        // 5. Root admin CAN demote/disable and delete the secondary admin
+        var disableSecondRes = await rootAdminClient.PutAsJsonAsync(
+            $"/api/v1/User/{secondAdmin.Id}",
+            new UpdateUserDto
+            {
+                Username = "secondary_admin",
+                UserTypeId = (int)PrimaryKeys.UserTypes.User,
+                IsActive = false
+            },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, disableSecondRes.StatusCode);
+
+        var deleteSecondRes = await rootAdminClient.DeleteAsync($"/api/v1/User/{secondAdmin.Id}", TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, deleteSecondRes.StatusCode);
+    }
 }

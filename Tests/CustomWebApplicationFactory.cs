@@ -58,10 +58,12 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     }
 
     public FakeDockerRegistryHandler RegistryHandler { get; } = new();
+    public FakeOutboundWebhookHandler OutboundWebhookHandler { get; } = new();
 
     public async Task ResetDatabaseAsync()
     {
         RegistryHandler.Reset();
+        OutboundWebhookHandler.Reset();
 
         using var scope = Services.CreateScope();
 
@@ -74,9 +76,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             DELETE FROM "RefreshTokens";
             DELETE FROM "AuditLogs";
             DELETE FROM "RepositoryPermissions";
+            DELETE FROM "RetentionPolicies";
+            DELETE FROM "WebhookSubscriptions";
             DELETE FROM "Users";
             DELETE FROM "UserTypes";
-            UPDATE "sqlite_sequence" SET "seq" = 0 WHERE "name" IN ('RefreshTokens', 'AuditLogs', 'RepositoryPermissions', 'Users', 'UserTypes');
+            UPDATE "sqlite_sequence" SET "seq" = 0 WHERE "name" IN ('RefreshTokens', 'AuditLogs', 'RepositoryPermissions', 'RetentionPolicies', 'WebhookSubscriptions', 'Users', 'UserTypes');
             """);
 
         DbInitializer.Initialize(dbContext);
@@ -173,6 +177,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
             services.AddHttpClient("DockerRegistry")
                 .ConfigurePrimaryHttpMessageHandler(() => RegistryHandler);
+
+            services.AddHttpClient("OutboundWebhook")
+                .ConfigurePrimaryHttpMessageHandler(() => OutboundWebhookHandler);
         });
     }
 
