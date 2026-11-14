@@ -31,44 +31,4 @@ public class UserTypeController(UserTypeRepository repository) : CustomBaseContr
 
         return HandleResult(result);
     }
-
-    [HttpPost]
-    [Authorize(Roles = Roles.Admin)]
-    [ProducesResponseType(typeof(UserTypeDto), StatusCodes.Status201Created)]
-    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
-    public async Task<ActionResult<UserTypeDto>> Add([FromBody] CreateUserTypeDto createUserTypeDto)
-    {
-        var result = await repository.Add(createUserTypeDto);
-
-        return HandleCreatedAtActionResult(result, nameof(GetById), ut => new { id = ut.Id });
-    }
-
-    [HttpPut("{id}")]
-    [Authorize(Roles = Roles.Admin)]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(typeof(ValidationProblemDetails), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
-    public async Task<ActionResult> Update([FromRoute] int id, [FromBody] UpdateUserTypeDto updateUserTypeDto)
-    {
-        var result = await repository.Update(id, updateUserTypeDto);
-
-        return HandleResult(result);
-    }
-
-    [HttpDelete("{id}")]
-    [Authorize(Roles = Roles.Admin)]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
-    public async Task<ActionResult> DeleteById([FromRoute] int id)
-    {
-        var result = await repository.DeleteById(id);
-
-        return HandleResult(result);
-    }
 }

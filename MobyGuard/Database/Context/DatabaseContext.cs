@@ -41,5 +41,12 @@ public class DatabaseContext(DbContextOptions<DatabaseContext> options) : DbCont
                 .HasForeignKey(token => token.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
+
+        modelBuilder.Entity<AuditLog>(entity =>
+        {
+            entity.HasIndex(log => log.CreatedAt);
+            entity.HasIndex(log => log.Username);
+            entity.HasIndex(log => log.Description);
+        });
     }
 }

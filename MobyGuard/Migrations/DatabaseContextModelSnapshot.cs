@@ -51,6 +51,12 @@ namespace MobyGuard.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("Description");
+
+                    b.HasIndex("Username");
+
                     b.ToTable("AuditLogs");
                 });
 

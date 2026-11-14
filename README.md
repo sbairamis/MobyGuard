@@ -64,7 +64,6 @@ Organizations deploying private Docker registries typically face two limitations
   * High-iteration `PBKDF2-HMAC-SHA512` password hashing with unique per-user cryptographic salts.
   * 15-minute JWT lifetime with SQLite-backed refresh token rotation and instant in-memory access token revocation.
   * In-memory brute-force lockout protection via .NET `IMemoryCache`.
-  * Hardened frontend delivery with sourcemap generation disabled in production builds.
 
 * **Audit Logging**:
   * Structured audit trail recording token issuances, image deletions, user creations, and policy changes.

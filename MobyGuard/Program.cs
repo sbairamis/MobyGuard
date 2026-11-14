@@ -11,6 +11,7 @@ using MobyGuard.Auth;
 using MobyGuard.Configuration;
 using MobyGuard.Database.Context;
 using MobyGuard.Extensions;
+using MobyGuard.Global;
 using MobyGuard.HealthChecks;
 using MobyGuard.Helpers;
 using MobyGuard.Pagination;
@@ -43,7 +44,10 @@ builder.Services.AddOpenApi();
 
 builder.Services.AddSingleton<RegistryTokenSigner>();
 
-builder.Services.AddHttpClient("DockerRegistry");
+builder.Services.AddHttpClient("DockerRegistry", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+});
 
 builder.Services.AddScoped<AuditLogRepository>();
 builder.Services.AddScoped<RegistryRepository>();
@@ -152,6 +156,9 @@ using (var scope = app.Services.CreateScope())
     {
         dbContext.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
     }
+
+    var retentionCutoff = DateTime.UtcNow.AddDays(-Variables.AuditLogRetentionDays);
+    dbContext.AuditLogs.Where(log => log.CreatedAt < retentionCutoff).ExecuteDelete();
 
     DbInitializer.Initialize(dbContext);
 }

@@ -34,37 +34,32 @@ public class UserTypeControllerTests : IClassFixture<CustomWebApplicationFactory
     }
 
     [Theory]
-    [InlineData(PrimaryKeys.UserTypes.Admin)]
-    [InlineData(PrimaryKeys.UserTypes.User)]
-    [InlineData(PrimaryKeys.UserTypes.Service)]
-    public async Task DeleteById_SystemUserType_ReturnsConflict(PrimaryKeys.UserTypes systemUserType)
+    [InlineData(PrimaryKeys.UserTypes.Admin, "Admin")]
+    [InlineData(PrimaryKeys.UserTypes.User, "User")]
+    [InlineData(PrimaryKeys.UserTypes.Service, "Service")]
+    public async Task GetById_SystemUserType_ReturnsOk(PrimaryKeys.UserTypes systemUserType, string expectedType)
     {
         var client = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
 
-        var response = await client.DeleteAsync($"/api/UserType/{(int)systemUserType}", TestContext.Current.CancellationToken);
+        var response = await client.GetAsync($"/api/UserType/{(int)systemUserType}", TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
-        var problem = await response.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal(ResponseMessages.CannotDeleteSystemUserType, problem!.Detail);
+        var dto = await response.Content.ReadFromJsonAsync<UserTypeDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(dto);
+        Assert.Equal(expectedType, dto.Type);
     }
 
     [Fact]
-    public async Task Add_And_Delete_CustomUserType_Works()
+    public async Task GetById_NonExistent_ReturnsNotFound()
     {
         var client = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
 
-        var addResponse = await client.PostAsJsonAsync(
-            "/api/UserType",
-            new CreateUserTypeDto { Type = "Auditor" },
-            TestContext.Current.CancellationToken);
+        var response = await client.GetAsync("/api/UserType/999", TestContext.Current.CancellationToken);
 
-        Assert.Equal(HttpStatusCode.Created, addResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
 
-        var created = await addResponse.Content.ReadFromJsonAsync<UserTypeDto>(cancellationToken: TestContext.Current.CancellationToken);
-
-        var deleteResponse = await client.DeleteAsync($"/api/UserType/{created!.Id}", TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
+        var problem = await response.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(ResponseMessages.UserTypeNotFound, problem!.Detail);
     }
 }
