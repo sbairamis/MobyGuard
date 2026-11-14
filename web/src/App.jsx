@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, loadSession, saveSession } from './api'
+import { api, DASHBOARD_VERSION, loadSession, saveSession } from './api'
 import Icon from './components/Icon'
 import AuthPage from './pages/AuthPage'
 import RegistryPage from './pages/RegistryPage'
@@ -11,6 +11,7 @@ import ProfilePage from './pages/ProfilePage'
 export default function App() {
   const [ready, setReady] = useState(false)
   const [setupRequired, setSetupRequired] = useState(false)
+  const [apiVersion, setApiVersion] = useState('v1.0.7')
   const [user, setUser] = useState(() => loadSession())
   const [route, setRoute] = useState(() => window.location.hash.slice(1) || '/')
   const [theme, setTheme] = useState(() => localStorage.getItem('mobyguard_theme') || 'dark')
@@ -60,6 +61,9 @@ export default function App() {
     async function init() {
       try {
         const status = await api.get('/api/v1/User/setup-status')
+        if (status?.apiVersion) {
+          setApiVersion(status.apiVersion)
+        }
         if (status?.setupRequired) {
           setSetupRequired(true)
           saveSession(null)
@@ -175,6 +179,17 @@ export default function App() {
           )}
         </nav>
 
+        <div style={{ padding: '10px 14px', borderTop: '1px solid var(--border)', fontSize: 11.5 }} className="muted">
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <span>API Version</span>
+            <span className="mono">{apiVersion} (v1)</span>
+          </div>
+          <div className="row" style={{ justifyContent: 'space-between', marginTop: 3 }}>
+            <span>Dashboard</span>
+            <span className="mono">{DASHBOARD_VERSION}</span>
+          </div>
+        </div>
+
         <div className="sidebar-footer">
           <div className="avatar">{initials}</div>
           <div className="who">
@@ -199,7 +214,7 @@ export default function App() {
       </aside>
 
       <main>
-        <PageComponent user={user} notify={notify} />
+        <PageComponent user={user} apiVersion={apiVersion} notify={notify} />
       </main>
 
       <ToastStack toasts={toasts} />

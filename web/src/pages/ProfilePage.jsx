@@ -1,13 +1,9 @@
 import { useEffect, useState } from 'react'
-import { api } from '../api'
+import { api, DASHBOARD_VERSION, formatDate } from '../api'
 
-export default function ProfilePage({ notify }) {
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
-  const [username, setUsername] = useState('')
-  const [role, setRole] = useState('')
+export default function ProfilePage({ apiVersion = 'v1.0.7', notify }) {
+  const [profile, setProfile] = useState(null)
   const [loadingProfile, setLoadingProfile] = useState(true)
-  const [savingProfile, setSavingProfile] = useState(false)
 
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -17,31 +13,12 @@ export default function ProfilePage({ notify }) {
     api.get('/api/v1/User/me')
       .then((me) => {
         if (me) {
-          setUsername(me.username)
-          setRole(me.userType)
-          setFirstName(me.firstName)
-          setLastName(me.lastName)
+          setProfile(me)
         }
       })
       .catch(() => {})
       .finally(() => setLoadingProfile(false))
   }, [])
-
-  async function handleSaveProfile(e) {
-    e.preventDefault()
-    setSavingProfile(true)
-    try {
-      await api.put('/api/v1/User/me', {
-        firstName: firstName.trim(),
-        lastName: lastName.trim()
-      })
-      notify('Profile updated.', 'ok')
-    } catch (err) {
-      notify(err.message, 'err')
-    } finally {
-      setSavingProfile(false)
-    }
-  }
 
   async function handleChangePassword(e) {
     e.preventDefault()
@@ -70,42 +47,47 @@ export default function ProfilePage({ notify }) {
       </div>
 
       <div className="grid cols-2">
-        <form className="card" onSubmit={handleSaveProfile} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <h2 style={{ margin: 0 }}>Profile Details</h2>
-          {loadingProfile ? (
-            <div className="empty"><span className="spin" /></div>
-          ) : (
-            <>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <h2 style={{ margin: 0 }}>Account Details</h2>
+            {loadingProfile ? (
+              <div className="empty"><span className="spin" /></div>
+            ) : (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 <label className="field">
                   Username
-                  <input type="text" value={username} disabled />
+                  <input type="text" value={profile?.username || ''} disabled />
                 </label>
                 <label className="field">
                   Role
-                  <input type="text" value={role} disabled />
-                </label>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <label className="field">
-                  First Name
-                  <input type="text" required value={firstName} onChange={(e) => setFirstName(e.target.value)} />
+                  <input type="text" value={profile?.userType || ''} disabled />
                 </label>
                 <label className="field">
-                  Last Name
-                  <input type="text" required value={lastName} onChange={(e) => setLastName(e.target.value)} />
+                  Created
+                  <input type="text" value={formatDate(profile?.createdAt)} disabled />
+                </label>
+                <label className="field">
+                  Last Login
+                  <input type="text" value={formatDate(profile?.lastLogin)} disabled />
                 </label>
               </div>
+            )}
+          </div>
 
-              <div>
-                <button type="submit" className="primary" disabled={savingProfile}>
-                  {savingProfile ? <span className="spin" /> : 'Save Profile'}
-                </button>
+          <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <h2 style={{ margin: 0 }}>System & Version Info</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <div style={{ background: 'var(--bg2)', padding: '10px 12px', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)' }}>
+                <div className="dim" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 650 }}>API Version</div>
+                <div className="mono" style={{ fontSize: 13.5, marginTop: 4 }}>{apiVersion} (/api/v1)</div>
               </div>
-            </>
-          )}
-        </form>
+              <div style={{ background: 'var(--bg2)', padding: '10px 12px', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)' }}>
+                <div className="dim" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 650 }}>Dashboard Version</div>
+                <div className="mono" style={{ fontSize: 13.5, marginTop: 4 }}>{DASHBOARD_VERSION}</div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <form className="card" onSubmit={handleChangePassword} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <h2 style={{ margin: 0 }}>Change Password</h2>
@@ -128,10 +110,13 @@ export default function ProfilePage({ notify }) {
             <input
               type="password"
               required
-              minLength={4}
+              minLength={8}
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
             />
+            <span className="muted" style={{ fontSize: 11.5 }}>
+              Must be 8–128 characters with uppercase, lowercase, number, and symbol (not blacklisted).
+            </span>
           </label>
 
           <div>
