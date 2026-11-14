@@ -135,4 +135,67 @@ public class RegistryControllerTests : IClassFixture<CustomWebApplicationFactory
         Assert.NotNull(auditLogs);
         Assert.Contains(auditLogs.Data, l => l.Repository == "team-a/demo-app:v1.0.0" && l.Actions == "delete");
     }
+
+    [Fact]
+    public async Task CatalogAndTagsCaching_SearchAndForceRefresh_WorksEndToEnd()
+    {
+        var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+
+        var initialRepos = await adminClient.GetFromJsonAsync<List<RegistryRepositoryDto>>(
+            "/api/v1/Registry/repositories",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(initialRepos);
+        Assert.Equal(2, initialRepos.Count);
+        Assert.Equal(1, _factory.RegistryHandler.CatalogRequestCount);
+
+        // Second request hits cache without calling upstream /v2/_catalog
+        var cachedRepos = await adminClient.GetFromJsonAsync<List<RegistryRepositoryDto>>(
+            "/api/v1/Registry/repositories",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(cachedRepos);
+        Assert.Equal(2, cachedRepos.Count);
+        Assert.Equal(1, _factory.RegistryHandler.CatalogRequestCount);
+
+        // Search filter works on cached catalog
+        var searchedRepos = await adminClient.GetFromJsonAsync<List<RegistryRepositoryDto>>(
+            "/api/v1/Registry/repositories?search=secret",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(searchedRepos);
+        Assert.Single(searchedRepos);
+        Assert.Equal("team-b/secret-app", searchedRepos[0].Name);
+
+        // Add repository in upstream registry; cached call still returns 2, refresh=true returns 3
+        _factory.RegistryHandler.AddRepository("team-c/new-service");
+        var stillCached = await adminClient.GetFromJsonAsync<List<RegistryRepositoryDto>>(
+            "/api/v1/Registry/repositories",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(2, stillCached!.Count);
+
+        var refreshedRepos = await adminClient.GetFromJsonAsync<List<RegistryRepositoryDto>>(
+            "/api/v1/Registry/repositories?refresh=true",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(refreshedRepos);
+        Assert.Equal(3, refreshedRepos.Count);
+        Assert.Equal(2, _factory.RegistryHandler.CatalogRequestCount);
+
+        // Tags caching and refresh=true
+        var initialTags = await adminClient.GetFromJsonAsync<RegistryRepositoryTagsDto>(
+            "/api/v1/Registry/tags?repositoryName=team-a/demo-app",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(["v1.0.0"], initialTags!.Tags);
+        Assert.Equal(1, _factory.RegistryHandler.TagsRequestCount);
+
+        _factory.RegistryHandler.AddDemoTag("v2.0.0");
+        var cachedTags = await adminClient.GetFromJsonAsync<RegistryRepositoryTagsDto>(
+            "/api/v1/Registry/tags?repositoryName=team-a/demo-app",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(["v1.0.0"], cachedTags!.Tags);
+        Assert.Equal(1, _factory.RegistryHandler.TagsRequestCount);
+
+        var refreshedTags = await adminClient.GetFromJsonAsync<RegistryRepositoryTagsDto>(
+            "/api/v1/Registry/tags?repositoryName=team-a/demo-app&refresh=true",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(["v1.0.0", "v2.0.0"], refreshedTags!.Tags);
+        Assert.Equal(2, _factory.RegistryHandler.TagsRequestCount);
+    }
 }

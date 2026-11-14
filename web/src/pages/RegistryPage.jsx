@@ -18,14 +18,19 @@ export default function RegistryPage({ notify }) {
 
   const host = window.location.host || 'registry.yourcompany.com'
 
-  async function fetchRepositories() {
+  async function fetchRepositories(forceRefresh = false) {
     setLoadingRepos(true)
     setRepoError('')
     try {
-      const list = await api.get('/api/v1/Registry/repositories')
+      const list = await api.get(`/api/v1/Registry/repositories${forceRefresh ? '?refresh=true' : ''}`)
       setRepos(list || [])
       if (list?.length > 0 && !selectedRepo) {
-        selectRepository(list[0])
+        selectRepository(list[0], forceRefresh)
+      } else if (forceRefresh && selectedRepo) {
+        const updatedRepo = (list || []).find((r) => r.name === selectedRepo.name)
+        if (updatedRepo) {
+          selectRepository(updatedRepo, true)
+        }
       }
     } catch (err) {
       setRepoError(err.message)
@@ -34,13 +39,15 @@ export default function RegistryPage({ notify }) {
     }
   }
 
-  async function selectRepository(repo) {
+  async function selectRepository(repo, forceRefresh = false) {
     setSelectedRepo(repo)
     setSelectedRef(null)
     setManifest(null)
     setLoadingTags(true)
     try {
-      const data = await api.get(`/api/v1/Registry/tags?repositoryName=${encodeURIComponent(repo.name)}`)
+      const data = await api.get(
+        `/api/v1/Registry/tags?repositoryName=${encodeURIComponent(repo.name)}${forceRefresh ? '&refresh=true' : ''}`
+      )
       setTagsData(data)
       if (data?.tags?.length > 0) {
         const preferred = data.tags.includes('latest') ? 'latest' : data.tags[0]
@@ -104,7 +111,7 @@ export default function RegistryPage({ notify }) {
         <div>
           <h1>Registry Images & Tags</h1>
         </div>
-        <button onClick={fetchRepositories} disabled={loadingRepos}>
+        <button onClick={() => fetchRepositories(true)} disabled={loadingRepos}>
           <Icon name="refresh" size={15} />
           Refresh Registry
         </button>
@@ -117,7 +124,7 @@ export default function RegistryPage({ notify }) {
               <b style={{ color: 'var(--warn)' }}>Upstream Docker Registry Notice</b>
               <p className="muted" style={{ margin: '4px 0 0', fontSize: 13 }}>{repoError}</p>
             </div>
-            <button className="sm" onClick={fetchRepositories}>Retry</button>
+            <button className="sm" onClick={() => fetchRepositories(true)}>Retry</button>
           </div>
         </div>
       )}
