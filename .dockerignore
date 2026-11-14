@@ -15,6 +15,7 @@
 **/bin/
 **/obj/
 **/out/
+**/wwwroot/
 **/TestResults/
 
 # Node.js and frontend dependencies

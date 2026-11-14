@@ -1,29 +1,45 @@
+# syntax=docker/dockerfile:1
+
 FROM --platform=$BUILDPLATFORM node:lts-alpine AS ui
 
 WORKDIR /web
 
 COPY web/package*.json ./
 
-RUN npm install --no-audit --no-fund
+RUN --mount=type=cache,id=npm,target=/root/.npm \
+    npm ci --no-audit --no-fund
 
 COPY web/ ./
 
 RUN npm run build
 
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+SHELL ["/bin/bash", "-c"]
+ARG TARGETARCH
+
+ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_NOLOGO=1
 
 WORKDIR /src
 
 COPY MobyGuard/*.csproj ./MobyGuard/
 
-RUN dotnet restore ./MobyGuard/MobyGuard.csproj
+RUN --mount=type=cache,id=nuget,sharing=locked,target=/root/.nuget/packages \
+    dotnet restore ./MobyGuard/MobyGuard.csproj -a "${TARGETARCH/amd64/x64}" --use-current-runtime
 
 COPY MobyGuard/ ./MobyGuard/
 COPY --from=ui /MobyGuard/wwwroot ./MobyGuard/wwwroot/
 
-RUN dotnet publish ./MobyGuard/MobyGuard.csproj -c Release -o /app/out
+RUN --mount=type=cache,id=nuget,sharing=locked,target=/root/.nuget/packages \
+    dotnet publish ./MobyGuard/MobyGuard.csproj \
+      -c Release \
+      -a "${TARGETARCH/amd64/x64}" \
+      --use-current-runtime \
+      --self-contained false \
+      --no-restore \
+      -o /app/out
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 
 WORKDIR /app
 
