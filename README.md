@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>Lightweight, self-hosted Docker and OCI Registry Control Plane.</b><br />
-  Fine-grained repository access control, ECDSA token authentication, and management dashboard for Docker Distribution.
+  Fine-grained repository access control, ECDSA token authentication, automated tag retention, Slack/Discord/Teams notifications, and management dashboard for Docker Distribution.
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19" />
   <img src="https://img.shields.io/badge/Docker-Registry_v2%2Fv3-2496ED?logo=docker&logoColor=white" alt="Docker Registry" />
   <img src="https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&logoColor=white" alt="SQLite" />
-  <img src="https://img.shields.io/badge/coverage-87.4%25-brightgreen" alt="Code Coverage" />
+  <img src="https://img.shields.io/badge/coverage-86.85%25-brightgreen" alt="Code Coverage" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
 </p>
 
@@ -31,13 +31,13 @@ Organizations deploying private Docker registries typically face two limitations
 * **Docker Registry & CNCF Distribution (`registry:2` / `registry:3`) Limitations**:
   * Relies on basic `htpasswd` authentication, granting all-or-nothing access to all images.
   * Lacks repository-level authorization and cannot restrict user permissions by namespace.
-  * Does not provide a web management interface for browsing tags, inspecting manifests, or deleting images.
+  * Does not provide a web management interface, automated tag cleanup policies, or webhook notifications.
 
 * **Enterprise Registry Suites (e.g., Harbor) Overhead**:
   * Requires substantial server resources (6 to 8 containers, 4GB to 8GB+ RAM).
   * Involves complex deployment charts and operational maintenance overhead.
 
-**MobyGuard provides a focused solution**: A lightweight, single-appliance control plane (~80MB RAM) that adds native Docker Registry v2 token authentication, fine-grained access control lists, and an administrative dashboard directly on top of vanilla Docker Distribution.
+**MobyGuard provides a focused solution**: A lightweight, single-appliance control plane (~80MB RAM) that adds native Docker Registry v2 token authentication, fine-grained access control lists, scheduled tag retention, multi-platform notifications, and an administrative dashboard directly on top of vanilla Docker Distribution.
 
 ---
 
@@ -52,57 +52,76 @@ Organizations deploying private Docker registries typically face two limitations
   * Per-user policy scoping supporting exact matches (`team-a/backend`), namespace wildcards (`team-a/*`), or global access (`*`).
   * Granular action control with independent toggles for **Pull**, **Push**, and **Delete** capabilities.
 
-* **Web Management Dashboard**:
-  * Catalog exploration with RFC 5988 pagination supporting large-scale registries (10,000+ repositories).
-  * OCI and Docker v2 manifest inspection, including media types, digest checksums, layer sizes, and container configurations.
-  * Image tag deletion workflows directly from the interface.
+* **Multi-Arch Web Management Dashboard & GC Tracking**:
+  * Single-flight catalog discovery with 15-second caching, RFC 5988 pagination, live search, and force refresh.
+  * OCI & Docker v2 manifest inspection with multi-architecture index platform switching (`linux/amd64`, `linux/arm64`, etc.), Buildx attestation classification, container configuration details, and layer breakdown.
+  * Pending Garbage Collection tracking banner with one-click copyable CLI cleanup command and admin GC acknowledgment.
 
-* **User and Service Account Management**:
-  * User account provisioning with role assignments (`Admin`, `User`).
-  * Dedicated headless accounts (`Service`) designed for CI/CD automation pipelines (GitHub Actions, GitLab CI, Drone).
+* **Automated Tag & Repository Retention Policies**:
+  * Pattern-scoped policies (`*`, `namespace/*`, exact repo) with configurable `Keep Last N` counts, `Max Age (Days)` thresholds, and comma-separated protected tag globs (e.g., `latest,v*,prod-*`).
+  * **Shared-Digest Safety**: Refuses to delete any manifest digest still referenced by a kept or protected tag.
+  * Interactive **Dry Run** previews plus a background scheduler supporting **Manual Only**, **Hourly**, **Daily**, **Weekly**, and **Monthly** intervals.
 
-* **Security Architecture**:
-  * High-iteration `PBKDF2-HMAC-SHA512` password hashing with unique per-user cryptographic salts.
-  * 15-minute JWT lifetime with SQLite-backed refresh token rotation and instant in-memory access token revocation.
-  * In-memory brute-force lockout protection via .NET `IMemoryCache`.
+* **Inbound Registry Events & Outbound Webhooks**:
+  * **Inbound Registry Webhook Receiver** (`POST /api/v1/Registry/events`): Ingests Docker Distribution notifications with optional constant-time `WebhookSecret` verification, records CLI `push` / `pull` / `delete` events with client IPs, and invalidates cached catalog/tags.
+  * **Outbound Webhook Notifications**: Delivers formatted notifications for **Slack** (Block Kit), **Discord** (rich embeds), and **Microsoft Teams** (Workflows Adaptive Cards) filtered by repository pattern and trigger (`Push`, `Delete`, `Retention`), with built-in test delivery status tracking.
+
+* **User, Service Account & Root Admin Governance**:
+  * Dedicated human (`Admin`, `User`) and headless CI/CD (`Service`) accounts, with bootstrap **Root Admin (`Id == 1`) protection** blocking deletion, demotion, deactivation, or modification by secondary admins.
+  * High-iteration `PBKDF2-HMAC-SHA512` password hashing, strict password complexity + common/username blacklist enforcement, 15-minute JWTs with single-use hashed refresh token rotation, and IP brute-force lockouts.
+  * Unified dropdown filter bars across Users, Policies, Retention Policies, Webhooks, and Audit Logs, plus light/dark themes.
 
 * **Audit Logging**:
-  * Structured audit trail recording token issuances, image deletions, user creations, and policy changes.
+  * Searchable audit trail recording token issuances, manifest pushes/pulls/deletes, user & policy mutations, retention executions, and GC acknowledgments.
 
 ---
 
 ## Screenshots
 
 ### Images & Manifest Inspector
-Browse catalog repositories, inspect OCI and Docker v2 image tags, examine layer sizes, and retrieve pull commands:
+Browse catalog repositories, inspect multi-arch OCI and Docker v2 manifests, examine layers and container config settings, and track pending garbage collection:
 
 <p align="center">
   <img src="docs/screenshots/repositories.png" alt="Images & Manifests" />
 </p>
 
+### Retention Policies & Scheduler
+Configure namespace-scoped tag cleanup rules, protect release tags, preview changes with Dry Run, and automate runs Hourly, Daily, Weekly, or Monthly:
+
+<p align="center">
+  <img src="docs/screenshots/retention-policies.png" alt="Retention Policies" />
+</p>
+
+### Outbound Webhooks (Slack, Discord & Microsoft Teams)
+Route repository `push`, `delete`, and `retention` notifications to Slack, Discord, or Microsoft Teams with live delivery testing:
+
+<p align="center">
+  <img src="docs/screenshots/webhooks.png" alt="Outbound Webhooks" />
+</p>
+
 ### Access Control Policies
-Manage per-user repository authorization rules with exact or wildcard (`namespace/*`) patterns and granular Pull, Push, and Delete toggles:
+Manage per-user repository authorization rules with exact or wildcard (`namespace/*`) patterns, dropdown filtering, and granular Pull, Push, and Delete toggles:
 
 <p align="center">
   <img src="docs/screenshots/policies.png" alt="Repository Access Control" />
 </p>
 
 ### User & Service Account Management
-Provision human operator accounts and dedicated headless service accounts for CI/CD automation pipelines:
+Provision human operator accounts with Root Admin protection and dedicated headless service accounts for CI/CD automation pipelines:
 
 <p align="center">
   <img src="docs/screenshots/users.png" alt="User Management" />
 </p>
 
 ### Audit Trail
-Monitor token issuances, administrative actions, client IP addresses, and timestamps:
+Monitor token issuances, CLI image pushes/pulls/deletes, retention runs, and administrative actions with client IP addresses and timestamps:
 
 <p align="center">
   <img src="docs/screenshots/audit-logs.png" alt="Audit Logs" />
 </p>
 
 ### Authentication Interface
-Clean sign-in interface with ECDSA token authentication and administrative onboarding:
+Clean sign-in interface with ECDSA token authentication and initial admin onboarding:
 
 <p align="center">
   <img src="docs/screenshots/login.png" alt="Sign In" />
@@ -128,21 +147,26 @@ Clean sign-in interface with ECDSA token authentication and administrative onboa
             /api/* (Control) │               │ 3. Stream Layers /v2/*
                              ▼               ▼    (Bearer Token Auth)
                    ┌───────────────────┐   ┌───────────────────┐
-                   │     MobyGuard     │   │  Docker Registry  │
+                   │     MobyGuard     │◄──┤  Docker Registry  │
                    │  (Auth & Web UI)  │   │ (registry:2 / v3) │
-                   └─────────┬─────────┘   └─────────┬─────────┘
-                             │                       │
-                             ▼                       ▼
-                       ┌───────────┐           ┌───────────┐
-                       │  SQLite   │           │  Storage  │
-                       │(Database) │           │  Volume   │
-                       └───────────┘           └───────────┘
+                   └────┬─────────┬────┘   └─────────┬─────────┘
+                        │         │ (Events /v1)     │
+                        │         ▼                  ▼
+                        │   ┌───────────┐      ┌───────────┐
+                        │   │  Slack /  │      │  Storage  │
+                        │   │  Discord  │      │  Volume   │
+                        │   │  / Teams  │      └───────────┘
+                        │   └───────────┘
+                        ▼
+                  ┌───────────┐
+                  │  SQLite   │
+                  │(Database) │
+                  └───────────┘
 ```
 
 * **Step 1 (Token Request)**: The Docker client requests an access token from MobyGuard (`/api/v1/Token`) using HTTP Basic authentication.
 * **Step 2 (Token Issuance)**: MobyGuard evaluates the user's repository permissions in SQLite and returns a cryptographically signed ECDSA `ES256` Bearer JWT.
-* **Step 3 (Layer Streaming)**: The Docker client presents the Bearer token directly to Docker Registry (`/v2/`), which verifies the signature and streams image layer blobs directly to storage.
-* **Control Plane Isolation**: MobyGuard handles authentication, authorization policy evaluation, user management, and dashboard operations without bottlenecking image layer transfers.
+* **Step 3 (Layer Streaming & Notifications)**: The Docker client presents the Bearer token directly to Docker Registry (`/v2/`), which verifies the signature and streams image layer blobs directly to storage. Optional Distribution notifications forward push/pull/delete events to MobyGuard (`POST /api/v1/Registry/events`), triggering audit logs, cache invalidation, and Slack/Discord/Teams alerts.
 
 ---
 
@@ -175,15 +199,6 @@ chmod 644 certs/*
   * Mounted into both MobyGuard and the Docker Registry container.
   * Docker Registry uses this certificate as its root trust bundle to verify the signature of incoming Bearer tokens without requiring access to the private key.
 
-#### Parameter Breakdown
-* `-x509`: Generates a self-signed X.509 certificate directly instead of a certificate signing request.
-* `-newkey ec -pkeyopt ec_paramgen_curve:prime256v1`: Generates an ECDSA private key using the NIST P-256 curve.
-* `-sha256`: Signs the certificate using the SHA-256 digest algorithm.
-* `-nodes`: Stores the private key unencrypted so container services can load it unattended on startup.
-* `-days 3650`: Sets a 10-year validity period for internal service authentication.
-* `-subj "/CN=mobyguard-token-issuer"`: Sets the subject Common Name matching the configured token issuer.
-* `chmod 644 certs/*`: Grants read access to the container process while preventing unauthorized host modifications.
-
 #### Upstream Docker Registry Configuration
 To configure Docker Registry (or CNCF Distribution) to authenticate via MobyGuard using this certificate, apply the following settings to your registry container:
 
@@ -199,8 +214,23 @@ volumes:
   - ./certs/registry-auth.crt:/certs/registry-auth.crt:ro
 ```
 
+*(Optional — Recommended for real-time audit logs, cache invalidation, GC tracking, and Slack/Discord/Teams push alerts)*: Configure Docker Distribution's webhook notifications to forward events to MobyGuard:
+
+```yaml
+notifications:
+  endpoints:
+    - name: mobyguard
+      url: http://mobyguard:5090/api/v1/Registry/events
+      headers:
+        X-Registry-Webhook-Secret:
+          - your_shared_webhook_secret
+      timeout: 2s
+      threshold: 3
+      backoff: 1s
+```
+
 ### 2. Configure `compose.yml`
-Save the following configuration as `compose.yml`:
+Save the following configuration as `compose.yml` *(when running behind a reverse proxy on the same host, prefer binding `127.0.0.1:${API_PORT:-5090}:5090` so external callers cannot bypass proxy headers)*:
 
 ```yaml
 services:
@@ -216,6 +246,7 @@ services:
     environment:
       ConnectionStrings__DefaultConnection: ${SQLITE_CONN_STRING:-Data Source=/app/data/mobyguard.db}
       RegistryTokenOptions__RegistryUrl: ${REGISTRY_URL}
+      RegistryTokenOptions__WebhookSecret: ${REGISTRY_WEBHOOK_SECRET:-}
       JwtOptions__SecurityKey: ${JWT_SECURITY_KEY}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5090/api/v1/health"]
@@ -236,7 +267,7 @@ networks:
 ```
 
 ### 3. Configure Environment Variables
-Create a `.env` file in the same directory (or copy from `.env.example`):
+Create a `.env` file in the same directory (or copy from [`.env.example`](.env.example)):
 
 ```bash
 cat << 'EOF' > .env
@@ -246,14 +277,18 @@ SQLITE_CONN_STRING=Data Source=/app/data/mobyguard.db
 # Upstream Docker Registry / CNCF Distribution URL
 REGISTRY_URL=http://registry:5000
 
+# Optional shared secret for inbound Registry events (POST /api/v1/Registry/events)
+REGISTRY_WEBHOOK_SECRET=
+
 # Web UI Authentication (minimum 32 characters)
 JWT_SECURITY_KEY=generate_a_secure_random_32_character_security_key_here!
 EOF
 ```
 
 * **`SQLITE_CONN_STRING`**: Connection string used by MobyGuard for its embedded SQLite database (stored in the `sqlite-data` volume at `/app/data/mobyguard.db`).
-* **`JWT_SECURITY_KEY`**: Set a cryptographically secure random string with at least 32 characters (e.g., generated with `openssl rand -base64 32`).
-* **`REGISTRY_URL`**: Set the URL of your Docker Registry or CNCF Distribution instance.
+* **`REGISTRY_URL`**: URL of your Docker Registry or CNCF Distribution instance.
+* **`REGISTRY_WEBHOOK_SECRET`**: Optional shared secret validated by `POST /api/v1/Registry/events` (`X-Registry-Webhook-Secret` header or `Authorization: Bearer`).
+* **`JWT_SECURITY_KEY`**: Cryptographically secure random string with at least 32 characters (e.g., generated with `openssl rand -base64 32`).
 
 ### 4. Deploy the Services
 Ensure the shared Docker bridge network exists and start the containers:
@@ -265,7 +300,7 @@ docker compose up -d
 
 ### 5. Initialize the Administrator Account
 * Navigate to `http://localhost:5090` in your web browser.
-* Complete the initial administrator setup form.
+* Complete the initial root administrator setup form (`Id == 1`).
 
 ---
 
@@ -326,12 +361,12 @@ For headless CI/CD systems (GitHub Actions, GitLab CI, Drone, Jenkins):
 
 ## Tech Stack
 
-* **Backend**: [.NET 10 (C#)](https://dotnet.microsoft.com/) — ASP.NET Core Web API with Microsoft OpenAPI.
+* **Backend**: [.NET 10 (C#)](https://dotnet.microsoft.com/) — ASP.NET Core Web API with Microsoft OpenAPI, background retention scheduler (`BackgroundService`), and outbound webhook dispatcher (`Slack` / `Discord` / `Teams`).
 * **Frontend**: [React 19](https://react.dev/) + [Vite](https://vitejs.dev/) embedded in `wwwroot`.
-* **Database**: [SQLite](https://www.sqlite.org/) for embedded relational persistence, policy storage, and hashed refresh tokens.
-* **Cache**: Built-in .NET `IMemoryCache` for short-lived JWT revocation (`jti`) and brute-force lockout counters.
-* **Token Signer**: Cryptographic ECDSA `ES256` token signing.
-* **Testing**: Integration testing with xUnit v3, `WebApplicationFactory`, and `Microsoft.Testing.Extensions.CodeCoverage` (~87.4% line coverage).
+* **Database**: [SQLite](https://www.sqlite.org/) for embedded relational persistence, policies, retention rules, webhook subscriptions, audit logs, and hashed refresh tokens.
+* **Cache**: Built-in .NET `IMemoryCache` for short-lived JWT revocation (`jti`), IP lockout counters, and 15-second registry catalog/tag caching.
+* **Token Signer**: Cryptographic ECDSA `ES256` token signing (`libtrust` key IDs & JWKS).
+* **Testing**: 61 integration tests with xUnit v3, `WebApplicationFactory`, and `Microsoft.Testing.Extensions.CodeCoverage` (**86.85%** line coverage).
 
 ---
 

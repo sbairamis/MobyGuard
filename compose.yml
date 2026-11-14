@@ -11,6 +11,7 @@ services:
     environment:
       ConnectionStrings__DefaultConnection: ${SQLITE_CONN_STRING:-Data Source=/app/data/mobyguard.db}
       RegistryTokenOptions__RegistryUrl: ${REGISTRY_URL}
+      RegistryTokenOptions__WebhookSecret: ${REGISTRY_WEBHOOK_SECRET:-}
       JwtOptions__SecurityKey: ${JWT_SECURITY_KEY}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5090/api/v1/health"]
