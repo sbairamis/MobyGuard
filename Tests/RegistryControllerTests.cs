@@ -309,4 +309,52 @@ public class RegistryControllerTests : IClassFixture<CustomWebApplicationFactory
             && l.Description == nameof(AuditLogEnums.Description.Manifest_Pulled)
             && l.ClientIp == "2001:db8::9");
     }
+
+    [Fact]
+    public async Task GetManifest_MultiArchIndex_ResolvesDefaultPlatformAndSupportsPlatformSelection()
+    {
+        var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+
+        var defaultManifest = await adminClient.GetFromJsonAsync<RegistryManifestDto>(
+            "/api/v1/Registry/manifest?repositoryName=team-a/demo-app&reference=multi-arch",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(defaultManifest);
+        Assert.True(defaultManifest.IsMultiArch);
+        Assert.Equal("multi-arch", defaultManifest.Reference);
+        Assert.Equal(FakeDockerRegistryHandler.MultiArchIndexDigest, defaultManifest.Digest);
+        Assert.Equal(3, defaultManifest.Platforms.Count);
+
+        // Runnable platforms sorted before attestation manifests
+        Assert.False(defaultManifest.Platforms[0].IsAttestation);
+        Assert.False(defaultManifest.Platforms[1].IsAttestation);
+        Assert.True(defaultManifest.Platforms[2].IsAttestation);
+
+        // Default resolved platform is linux/amd64 with its actual layer size (4096 bytes)
+        Assert.Equal(FakeDockerRegistryHandler.DemoDigest, defaultManifest.SelectedPlatformDigest);
+        Assert.Equal("amd64", defaultManifest.Architecture);
+        Assert.Equal("linux", defaultManifest.Os);
+        Assert.Equal(4096, defaultManifest.TotalSizeBytes);
+        Assert.Single(defaultManifest.Layers);
+
+        // Request specific platformDigest (linux/arm64)
+        var arm64Manifest = await adminClient.GetFromJsonAsync<RegistryManifestDto>(
+            $"/api/v1/Registry/manifest?repositoryName=team-a/demo-app&reference=multi-arch&platformDigest={Uri.EscapeDataString(FakeDockerRegistryHandler.MultiArchArm64Digest)}",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(arm64Manifest);
+        Assert.True(arm64Manifest.IsMultiArch);
+        Assert.Equal("multi-arch", arm64Manifest.Reference);
+        Assert.Equal(FakeDockerRegistryHandler.MultiArchArm64Digest, arm64Manifest.SelectedPlatformDigest);
+        Assert.Equal("arm64", arm64Manifest.Architecture);
+        Assert.Equal("linux", arm64Manifest.Os);
+        Assert.Equal(8192, arm64Manifest.TotalSizeBytes);
+        Assert.Single(arm64Manifest.Layers);
+        Assert.Equal(["/app/server"], arm64Manifest.Entrypoint);
+        Assert.Equal(["5090/tcp"], arm64Manifest.ExposedPorts);
+
+        // Unknown platformDigest returns 404 NotFound
+        var unknownPlatformRes = await adminClient.GetAsync(
+            "/api/v1/Registry/manifest?repositoryName=team-a/demo-app&reference=multi-arch&platformDigest=sha256:9999999999999999999999999999999999999999999999999999999999999999",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NotFound, unknownPlatformRes.StatusCode);
+    }
 }

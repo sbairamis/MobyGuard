@@ -9,6 +9,11 @@ public class FakeDockerRegistryHandler : HttpMessageHandler
     public const string DemoDigest = "sha256:46faa9a1ae6813194b53921a370f2f4f8c5e1aae228a89bceafef5847a6a3278";
     public const string ConfigDigest = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
     public const string LayerDigest = "sha256:2222222222222222222222222222222222222222222222222222222222222222";
+    public const string MultiArchIndexDigest = "sha256:3333333333333333333333333333333333333333333333333333333333333333";
+    public const string MultiArchArm64Digest = "sha256:4444444444444444444444444444444444444444444444444444444444444444";
+    public const string Arm64ConfigDigest = "sha256:5555555555555555555555555555555555555555555555555555555555555555";
+    public const string Arm64LayerDigest = "sha256:6666666666666666666666666666666666666666666666666666666666666666";
+    public const string AttestationDigest = "sha256:7777777777777777777777777777777777777777777777777777777777777777";
 
     private readonly object _lock = new();
     private HashSet<string> _repositories = new(StringComparer.OrdinalIgnoreCase) { "team-a/demo-app", "team-b/secret-app" };
@@ -130,6 +135,97 @@ public class FakeDockerRegistryHandler : HttpMessageHandler
                   "architecture": "amd64",
                   "os": "linux",
                   "created": "2026-11-14T12:00:00Z"
+                }
+                """));
+        }
+
+        if ((request.Method == HttpMethod.Get || request.Method == HttpMethod.Head)
+            && (path == "/v2/team-a/demo-app/manifests/multi-arch" || path == $"/v2/team-a/demo-app/manifests/{MultiArchIndexDigest}"))
+        {
+            var response = JsonResponse(
+                HttpStatusCode.OK,
+                $$"""
+                {
+                  "schemaVersion": 2,
+                  "mediaType": "application/vnd.oci.image.index.v1+json",
+                  "manifests": [
+                    {
+                      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                      "size": 512,
+                      "digest": "{{AttestationDigest}}",
+                      "platform": {
+                        "architecture": "unknown",
+                        "os": "unknown"
+                      }
+                    },
+                    {
+                      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                      "size": 1024,
+                      "digest": "{{MultiArchArm64Digest}}",
+                      "platform": {
+                        "architecture": "arm64",
+                        "os": "linux",
+                        "variant": "v8"
+                      }
+                    },
+                    {
+                      "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                      "size": 1024,
+                      "digest": "{{DemoDigest}}",
+                      "platform": {
+                        "architecture": "amd64",
+                        "os": "linux"
+                      }
+                    }
+                  ]
+                }
+                """,
+                "application/vnd.oci.image.index.v1+json");
+
+            response.Headers.TryAddWithoutValidation("Docker-Content-Digest", MultiArchIndexDigest);
+            return Task.FromResult(response);
+        }
+
+        if ((request.Method == HttpMethod.Get || request.Method == HttpMethod.Head)
+            && path == $"/v2/team-a/demo-app/manifests/{MultiArchArm64Digest}")
+        {
+            var response = JsonResponse(
+                HttpStatusCode.OK,
+                $$"""
+                {
+                  "schemaVersion": 2,
+                  "mediaType": "application/vnd.oci.image.manifest.v1+json",
+                  "config": {
+                    "mediaType": "application/vnd.oci.image.config.v1+json",
+                    "size": 1024,
+                    "digest": "{{Arm64ConfigDigest}}"
+                  },
+                  "layers": [
+                    {
+                      "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                      "size": 8192,
+                      "digest": "{{Arm64LayerDigest}}"
+                    }
+                  ]
+                }
+                """,
+                "application/vnd.oci.image.manifest.v1+json");
+
+            response.Headers.TryAddWithoutValidation("Docker-Content-Digest", MultiArchArm64Digest);
+            return Task.FromResult(response);
+        }
+
+        if (request.Method == HttpMethod.Get && path == $"/v2/team-a/demo-app/blobs/{Arm64ConfigDigest}")
+        {
+            return Task.FromResult(JsonResponse(HttpStatusCode.OK, """
+                {
+                  "architecture": "arm64",
+                  "os": "linux",
+                  "created": "2026-11-14T13:00:00Z",
+                  "config": {
+                    "Entrypoint": ["/app/server"],
+                    "ExposedPorts": { "5090/tcp": {} }
+                  }
                 }
                 """));
         }

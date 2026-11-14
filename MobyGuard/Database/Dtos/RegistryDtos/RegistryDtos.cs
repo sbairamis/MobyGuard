@@ -24,6 +24,7 @@ public class RegistryManifestDto
     public string MediaType { get; set; } = string.Empty;
     public int SchemaVersion { get; set; }
     public bool IsMultiArch { get; set; }
+    public string SelectedPlatformDigest { get; set; } = string.Empty;
     public long TotalSizeBytes { get; set; }
     public string Architecture { get; set; } = string.Empty;
     public string Os { get; set; } = string.Empty;
@@ -51,6 +52,7 @@ public class RegistryPlatformDto
     public string Architecture { get; set; } = string.Empty;
     public string Os { get; set; } = string.Empty;
     public string Variant { get; set; } = string.Empty;
+    public bool IsAttestation { get; set; }
 }
 
 public class RegistryEventEnvelopeDto
