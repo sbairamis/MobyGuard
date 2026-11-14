@@ -21,4 +21,6 @@ public class RegistryTokenOptions
 
     [Required]
     public string RegistryUrl { get; init; } = "http://registry:5000";
+
+    public string? WebhookSecret { get; init; }
 }

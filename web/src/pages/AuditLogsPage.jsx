@@ -164,7 +164,7 @@ export default function AuditLogsPage({ notify }) {
                       <span className={`badge ${
                         log.description === 'Manifest_Deleted' || log.description === 'Permission_Deleted'
                           ? 'err'
-                          : log.description === 'Token_Issued'
+                          : log.description === 'Token_Issued' || log.description === 'Manifest_Pulled'
                             ? 'info'
                             : 'ok'
                       }`}>

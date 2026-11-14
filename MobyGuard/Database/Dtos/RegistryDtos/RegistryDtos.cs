@@ -52,3 +52,47 @@ public class RegistryPlatformDto
     public string Os { get; set; } = string.Empty;
     public string Variant { get; set; } = string.Empty;
 }
+
+public class RegistryEventEnvelopeDto
+{
+    public List<RegistryEventItemDto> Events { get; set; } = [];
+}
+
+public class RegistryEventItemDto
+{
+    public string Id { get; set; } = string.Empty;
+    public DateTime? Timestamp { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public RegistryEventTargetDto? Target { get; set; }
+    public RegistryEventRequestDto? Request { get; set; }
+    public RegistryEventActorDto? Actor { get; set; }
+}
+
+public class RegistryEventTargetDto
+{
+    public string MediaType { get; set; } = string.Empty;
+    public long Size { get; set; }
+    public string Digest { get; set; } = string.Empty;
+    public string Repository { get; set; } = string.Empty;
+    public string Tag { get; set; } = string.Empty;
+    public string Url { get; set; } = string.Empty;
+}
+
+public class RegistryEventRequestDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string Addr { get; set; } = string.Empty;
+    public string Host { get; set; } = string.Empty;
+    public string Method { get; set; } = string.Empty;
+    public string UserAgent { get; set; } = string.Empty;
+}
+
+public class RegistryEventActorDto
+{
+    public string Name { get; set; } = string.Empty;
+}
+
+public class RegistryWebhookResultDto
+{
+    public int ProcessedEvents { get; set; }
+}
