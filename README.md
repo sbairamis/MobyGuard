@@ -14,7 +14,6 @@
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black" alt="React 19" />
   <img src="https://img.shields.io/badge/Docker-Registry_v2%2Fv3-2496ED?logo=docker&logoColor=white" alt="Docker Registry" />
   <img src="https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&logoColor=white" alt="SQLite" />
-  <img src="https://img.shields.io/badge/Redis-8-DC382D?logo=redis&logoColor=white" alt="Redis 8" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
 </p>
 
@@ -63,8 +62,8 @@ Organizations deploying private Docker registries typically face two limitations
 
 * **Security Architecture**:
   * High-iteration `PBKDF2-HMAC-SHA512` password hashing with unique per-user cryptographic salts.
-  * 15-minute JWT lifetime with Redis-backed refresh token rotation and instant user-level revocation.
-  * Rate-limiting and brute-force lockout protection via Redis.
+  * 15-minute JWT lifetime with SQLite-backed refresh token rotation and instant in-memory access token revocation.
+  * In-memory brute-force lockout protection via .NET `IMemoryCache`.
   * Hardened frontend delivery with sourcemap generation disabled in production builds.
 
 * **Audit Logging**:
@@ -131,13 +130,13 @@ Clean sign-in interface with ECDSA token authentication and administrative onboa
                    ┌───────────────────┐   ┌───────────────────┐
                    │     MobyGuard     │   │  Docker Registry  │
                    │  (Auth & Web UI)  │   │ (registry:2 / v3) │
-                   └─┬───────────────┬─┘   └─────────┬─────────┘
-                     │               │               │
-                     ▼               ▼               ▼
-               ┌───────────┐   ┌───────────┐   ┌───────────┐
-               │  SQLite   │   │   Redis   │   │  Storage  │
-               │(Database) │   │  (Cache)  │   │  Volume   │
-               └───────────┘   └───────────┘   └───────────┘
+                   └─────────┬─────────┘   └─────────┬─────────┘
+                             │                       │
+                             ▼                       ▼
+                       ┌───────────┐           ┌───────────┐
+                       │  SQLite   │           │  Storage  │
+                       │(Database) │           │  Volume   │
+                       └───────────┘           └───────────┘
 ```
 
 * **Step 1 (Token Request)**: The Docker client requests an access token from MobyGuard (`/api/Token`) using HTTP Basic authentication.
@@ -213,12 +212,8 @@ services:
     volumes:
       - ${CERTS_DIR:-./certs}:/app/certs:ro
       - sqlite-data:/app/data
-    depends_on:
-      redis:
-        condition: service_healthy
     environment:
       ConnectionStrings__DefaultConnection: ${SQLITE_CONN_STRING:-Data Source=/app/data/mobyguard.db}
-      ConnectionStrings__RedisConnection: ${REDIS_CONN_STRING}
       RegistryTokenOptions__RegistryUrl: ${REGISTRY_URL}
       JwtOptions__SecurityKey: ${JWT_SECURITY_KEY}
     healthcheck:
@@ -230,25 +225,6 @@ services:
     networks:
       - default
       - registry-net
-
-  redis:
-    image: redis:8.10-alpine
-    container_name: mobyguard-redis
-    restart: unless-stopped
-    volumes:
-      - ./data/redis:/data
-    environment:
-      REDISCLI_AUTH: ${REDIS_PASS}
-    command: >-
-      redis-server
-      --requirepass ${REDIS_PASS}
-      --appendonly yes
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 5s
 
 volumes:
   sqlite-data:
@@ -266,10 +242,6 @@ cat << 'EOF' > .env
 # Database Connection String (SQLite)
 SQLITE_CONN_STRING=Data Source=/app/data/mobyguard.db
 
-# Redis Credentials & Connection String
-REDIS_PASS=change_this_redis_password
-REDIS_CONN_STRING=redis:6379,password=change_this_redis_password
-
 # Upstream Docker Registry / CNCF Distribution URL
 REGISTRY_URL=http://registry:5000
 
@@ -279,7 +251,6 @@ EOF
 ```
 
 * **`SQLITE_CONN_STRING`**: Connection string used by MobyGuard for its embedded SQLite database (stored in the `sqlite-data` volume at `/app/data/mobyguard.db`).
-* **`REDIS_CONN_STRING`**: Connection string used by MobyGuard for session caching and rate-limiting.
 * **`JWT_SECURITY_KEY`**: Set a cryptographically secure random string with at least 32 characters (e.g., generated with `openssl rand -base64 32`).
 * **`REGISTRY_URL`**: Set the URL of your Docker Registry or CNCF Distribution instance.
 
@@ -356,10 +327,10 @@ For headless CI/CD systems (GitHub Actions, GitLab CI, Drone, Jenkins):
 
 * **Backend**: [.NET 10 (C#)](https://dotnet.microsoft.com/) — ASP.NET Core Web API with Microsoft OpenAPI.
 * **Frontend**: [React 19](https://react.dev/) + [Vite](https://vitejs.dev/) embedded in `wwwroot`.
-* **Database**: [SQLite](https://www.sqlite.org/) for embedded relational persistence and policy storage.
-* **Cache**: [Redis 8](https://redis.io/) for JWT revocation, sessions, and rate-limiting.
+* **Database**: [SQLite](https://www.sqlite.org/) for embedded relational persistence, policy storage, and hashed refresh tokens.
+* **Cache**: Built-in .NET `IMemoryCache` for short-lived JWT revocation (`jti`) and brute-force lockout counters.
 * **Token Signer**: Cryptographic ECDSA `ES256` token signing.
-* **Testing**: Integration testing with xUnit v3 and **Testcontainers** (Redis).
+* **Testing**: Integration testing with xUnit v3 and `WebApplicationFactory`.
 
 ---
 
