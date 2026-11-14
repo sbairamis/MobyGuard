@@ -13,7 +13,7 @@ public class DatabaseContext(DbContextOptions<DatabaseContext> options) : DbCont
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
-        // PostgreSQL's timestamptz only accepts UTC values.
+        // Store and materialize all DateTime values as UTC.
         configurationBuilder.Properties<DateTime>().HaveConversion<UtcDateTimeConverter>();
     }
 
@@ -23,11 +23,9 @@ public class DatabaseContext(DbContextOptions<DatabaseContext> options) : DbCont
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        modelBuilder.HasPostgresExtension("citext");
-
         modelBuilder.Entity<RepositoryPermission>()
             .Property(permission => permission.RepositoryPattern)
-            .HasColumnType("citext");
+            .UseCollation("NOCASE");
 
         modelBuilder.Entity<RepositoryPermission>()
             .HasIndex(permission => new { permission.UserId, permission.RepositoryPattern })

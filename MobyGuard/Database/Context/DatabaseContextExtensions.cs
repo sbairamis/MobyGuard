@@ -4,14 +4,15 @@ namespace MobyGuard.Database.Context;
 
 public static class DatabaseContextExtensions
 {
-    // Rows inserted with explicit ids don't advance PostgreSQL's identity sequence,
-    // so move it past the highest id or the next insert collides with an existing row.
+    // Rows inserted with explicit ids or deleted rows can leave SQLite's sqlite_sequence out of sync,
+    // so align it with the current highest id in the table.
     public static void ResetIdentitySequence<TEntity>(this DatabaseContext context) where TEntity : class
     {
-        var table = context.Model.FindEntityType(typeof(TEntity))!.GetTableName();
+        var table = context.Model.FindEntityType(typeof(TEntity))!.GetTableName()!;
+        var quotedTable = table.Replace("\"", "\"\"");
 
-        var sql = $"SELECT setval(pg_get_serial_sequence('\"{table}\"', 'Id'), COALESCE((SELECT MAX(\"Id\") FROM \"{table}\"), 0) + 1, false);";
+        var sql = $"UPDATE \"sqlite_sequence\" SET \"seq\" = COALESCE((SELECT MAX(\"Id\") FROM \"{quotedTable}\"), 0) WHERE \"name\" = {{0}};";
 
-        context.Database.ExecuteSqlRaw(sql);
+        context.Database.ExecuteSqlRaw(sql, table);
     }
 }

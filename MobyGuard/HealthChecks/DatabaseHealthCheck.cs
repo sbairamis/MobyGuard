@@ -12,12 +12,12 @@ public class DatabaseHealthCheck(DatabaseContext dbContext) : IHealthCheck
             var canConnect = await dbContext.Database.CanConnectAsync(cancellationToken);
 
             return canConnect
-                ? HealthCheckResult.Healthy("PostgreSQL database is reachable.")
-                : HealthCheckResult.Unhealthy("PostgreSQL database is unreachable.");
+                ? HealthCheckResult.Healthy("SQLite database is reachable.")
+                : HealthCheckResult.Unhealthy("SQLite database is unreachable.");
         }
         catch (Exception ex)
         {
-            return HealthCheckResult.Unhealthy("PostgreSQL database check failed.", ex);
+            return HealthCheckResult.Unhealthy("SQLite database check failed.", ex);
         }
     }
 }

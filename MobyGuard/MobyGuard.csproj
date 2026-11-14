@@ -18,7 +18,7 @@
       <PrivateAssets>contentfiles;analyzers;build</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.9" />
     <PackageReference Include="StackExchange.Redis" Version="3.4.5" />
   </ItemGroup>
 

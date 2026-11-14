@@ -368,5 +368,8 @@ appsettings.json
 **/certs/*.key
 **/certs/*.crt
 MobyGuard/wwwroot/
+*.db
+*.db-shm
+*.db-wal
 
 

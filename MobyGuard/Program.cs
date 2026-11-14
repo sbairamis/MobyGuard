@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.HttpOverrides;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -117,7 +118,7 @@ builder.Services.AddTransient<IUriService>(options =>
     return new UriService(uri);
 });
 
-builder.Services.AddDbContext<DatabaseContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContext<DatabaseContext>(options => options.UseSqlite(connectionString));
 
 builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 {
@@ -150,7 +151,16 @@ using (var scope = app.Services.CreateScope())
 
     var dbContext = services.GetRequiredService<DatabaseContext>();
 
+    var activeConnectionString = dbContext.Database.GetConnectionString();
+
+    EnsureSqliteDirectoryExists(activeConnectionString);
+
     dbContext.Database.Migrate();
+
+    if (IsFileBasedSqlite(activeConnectionString))
+    {
+        dbContext.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+    }
 
     DbInitializer.Initialize(dbContext);
 }
@@ -176,4 +186,37 @@ var hostingOptions = app.Services.GetRequiredService<IOptions<HostingOptions>>()
 
 app.Run($"{hostingOptions.Scheme}://{hostingOptions.Ip}:{hostingOptions.Port}");
 
-public partial class Program { }
+public partial class Program
+{
+    private static bool IsFileBasedSqlite(string? connectionString)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            return false;
+        }
+
+        var sqliteBuilder = new SqliteConnectionStringBuilder(connectionString);
+
+        return sqliteBuilder.Mode != SqliteOpenMode.Memory
+               && !string.IsNullOrWhiteSpace(sqliteBuilder.DataSource)
+               && !string.Equals(sqliteBuilder.DataSource, ":memory:", StringComparison.OrdinalIgnoreCase)
+               && !sqliteBuilder.DataSource.StartsWith("file:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void EnsureSqliteDirectoryExists(string? connectionString)
+    {
+        if (!IsFileBasedSqlite(connectionString))
+        {
+            return;
+        }
+
+        var sqliteBuilder = new SqliteConnectionStringBuilder(connectionString);
+        var fullPath = Path.GetFullPath(sqliteBuilder.DataSource);
+        var directory = Path.GetDirectoryName(fullPath);
+
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+    }
+}

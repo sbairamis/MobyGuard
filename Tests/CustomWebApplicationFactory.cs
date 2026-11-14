@@ -1,4 +1,3 @@
-using System.Data.Common;
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -9,6 +8,7 @@ using System.Text;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -22,56 +22,36 @@ using MobyGuard.Database.Models;
 using MobyGuard.Enumerators;
 using MobyGuard.Helpers;
 using MobyGuard.Seeders;
-using Npgsql;
-using Respawn;
 using StackExchange.Redis;
-using Testcontainers.PostgreSql;
 using Testcontainers.Redis;
 
 namespace Tests;
 
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
-    private readonly PostgreSqlContainer _dbContainer;
     private readonly RedisContainer _redisContainer;
-    private DbConnection _dbConnection = default!;
-    private Respawner _respawner = default!;
 
-    private readonly string _certsDirectory = Path.Combine(Path.GetTempPath(), "mobyguard-tests", Guid.NewGuid().ToString("N"));
+    private readonly string _tempDirectory = Path.Combine(Path.GetTempPath(), "mobyguard-tests", Guid.NewGuid().ToString("N"));
+    private string _dbPath = string.Empty;
     private string _certPath = string.Empty;
     private string _keyPath = string.Empty;
 
     public CustomWebApplicationFactory()
     {
-        _dbContainer = new PostgreSqlBuilder("postgres:17-alpine")
-            .WithDatabase("mobyguard_test")
-            .WithUsername("mobyguard_test_user")
-            .WithPassword("mobyguard_test_pass")
-            .Build();
-
         _redisContainer = new RedisBuilder("redis:7-alpine")
             .Build();
     }
 
     public async ValueTask InitializeAsync()
     {
-        await Task.WhenAll(_dbContainer.StartAsync(), _redisContainer.StartAsync());
+        await _redisContainer.StartAsync();
 
-        Directory.CreateDirectory(_certsDirectory);
+        Directory.CreateDirectory(_tempDirectory);
+        _dbPath = Path.Combine(_tempDirectory, "mobyguard-test.db");
         GenerateSelfSignedCert();
 
-        // Start the app first: Program.cs applies the migrations, and Respawn needs the tables to exist.
+        // Start the app so Program.cs creates and migrates the SQLite database.
         _ = Server;
-
-        _dbConnection = new NpgsqlConnection(_dbContainer.GetConnectionString());
-
-        await _dbConnection.OpenAsync();
-
-        _respawner = await Respawner.CreateAsync(_dbConnection, new RespawnerOptions
-        {
-            DbAdapter = DbAdapter.Postgres,
-            TablesToIgnore = new Respawn.Graph.Table[] { "__EFMigrationsHistory" }
-        });
     }
 
     private void GenerateSelfSignedCert()
@@ -80,8 +60,8 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         var req = new CertificateRequest("CN=mobyguard-token-issuer", ecdsa, HashAlgorithmName.SHA256);
         using var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddYears(1));
 
-        _certPath = Path.Combine(_certsDirectory, "registry-auth.crt");
-        _keyPath = Path.Combine(_certsDirectory, "registry-auth.key");
+        _certPath = Path.Combine(_tempDirectory, "registry-auth.crt");
+        _keyPath = Path.Combine(_tempDirectory, "registry-auth.key");
 
         File.WriteAllText(_certPath, cert.ExportCertificatePem());
         File.WriteAllText(_keyPath, ecdsa.ExportPkcs8PrivateKeyPem());
@@ -89,13 +69,19 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     public async Task ResetDatabaseAsync()
     {
-        await _respawner.ResetAsync(_dbConnection);
-
         await _redisContainer.ExecAsync(["redis-cli", "FLUSHALL"]);
 
         using var scope = Services.CreateScope();
 
         var dbContext = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
+
+        await dbContext.Database.ExecuteSqlRawAsync("""
+            DELETE FROM "AuditLogs";
+            DELETE FROM "RepositoryPermissions";
+            DELETE FROM "Users";
+            DELETE FROM "UserTypes";
+            UPDATE "sqlite_sequence" SET "seq" = 0 WHERE "name" IN ('AuditLogs', 'RepositoryPermissions', 'Users', 'UserTypes');
+            """);
 
         DbInitializer.Initialize(dbContext);
 
@@ -177,6 +163,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     {
         builder.UseEnvironment("Testing");
 
+        builder.UseSetting("ConnectionStrings:DefaultConnection", $"Data Source={_dbPath}");
         builder.UseSetting("ConnectionStrings:RedisConnection", _redisContainer.GetConnectionString());
         builder.UseSetting("RegistryTokenOptions:CertificatePath", _certPath);
         builder.UseSetting("RegistryTokenOptions:PrivateKeyPath", _keyPath);
@@ -186,11 +173,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             services.RemoveAll(typeof(DbContextOptions<DatabaseContext>));
             services.RemoveAll(typeof(DatabaseContext));
 
-            var connectionString = _dbContainer.GetConnectionString();
-
             services.AddDbContext<DatabaseContext>(options =>
             {
-                options.UseNpgsql(connectionString);
+                options.UseSqlite($"Data Source={_dbPath}");
             });
 
             services.RemoveAll(typeof(IConnectionMultiplexer));
@@ -203,18 +188,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     {
         await base.DisposeAsync();
 
-        if (_dbConnection != null)
-        {
-            await _dbConnection.DisposeAsync();
-        }
-
-        await _dbContainer.DisposeAsync();
+        SqliteConnection.ClearAllPools();
 
         await _redisContainer.DisposeAsync();
 
-        if (Directory.Exists(_certsDirectory))
+        if (Directory.Exists(_tempDirectory))
         {
-            Directory.Delete(_certsDirectory, recursive: true);
+            Directory.Delete(_tempDirectory, recursive: true);
         }
     }
 }
