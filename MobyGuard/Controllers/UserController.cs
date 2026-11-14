@@ -135,27 +135,6 @@ public class UserController(UserRepository repository) : CustomBaseController
         return HandleCreatedAtActionResult(result, nameof(GetById), user => new { id = user.Id });
     }
 
-    [HttpPut("me")]
-    [Authorize(Roles = $"{Roles.Admin}, {Roles.User}")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status403Forbidden)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
-    public async Task<ActionResult> UpdateMe(UpdateMeDto updateMeDto)
-    {
-        if (!TryGetCallerId(out var callerId))
-        {
-            return Unauthorized();
-        }
-
-        var result = await repository.UpdateMe(updateMeDto, callerId);
-
-        return HandleResult(result);
-    }
-
     [HttpPut("{id}")]
     [Authorize(Roles = Roles.Admin)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

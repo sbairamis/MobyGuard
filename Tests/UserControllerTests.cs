@@ -120,8 +120,6 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         var updateDto = new UpdateUserDto
         {
             Username = "User",
-            FirstName = "User",
-            LastName = "User",
             UserTypeId = (int)PrimaryKeys.UserTypes.User,
             IsActive = false
         };
@@ -263,7 +261,7 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
     }
 
     [Fact]
-    public async Task ProfileUpdate_ClearsLoginLockoutWithoutRevokingSession()
+    public async Task SelfServicePasswordChange_ClearsLoginLockoutWithoutRevokingSession()
     {
         var loginResponse = await LoginFromAsync("203.0.113.10", "User", "user");
         var loginBody = await loginResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
@@ -277,19 +275,19 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
 
         Assert.Equal(HttpStatusCode.TooManyRequests, (await LoginFromAsync("198.51.100.77", "User", "user")).StatusCode);
 
-        // Update profile (calls ClearAllUserLoginRetries, NOT DeleteUserEntries)
+        // Self-service password change calls ClearAllUserLoginRetries, NOT DeleteUserEntries
         var userClient = _factory.CreateClient();
         userClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginBody.Token);
 
         var updateResponse = await userClient.PutAsJsonAsync(
-            "/api/v1/User/me",
-            new UpdateMeDto { FirstName = "Updated", LastName = "User" },
+            "/api/v1/User/me/password",
+            new ChangePasswordDto { CurrentPassword = "user", Password = "Val1d#Password99" },
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, updateResponse.StatusCode);
 
         // Existing access token, refresh token, and cleared lockout IP must all work
         Assert.Equal(HttpStatusCode.OK, (await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await LoginFromAsync("198.51.100.77", "User", "user")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await LoginFromAsync("198.51.100.77", "User", "Val1d#Password99")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await _factory.CreateClient().PostAsJsonAsync(
             "/api/v1/User/refresh",
             new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
@@ -335,14 +333,13 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         var statusBefore = await client.GetFromJsonAsync<SetupStatusDto>("/api/v1/User/setup-status", TestContext.Current.CancellationToken);
         Assert.NotNull(statusBefore);
         Assert.True(statusBefore.SetupRequired);
+        Assert.Equal("v1.0.7", statusBefore.ApiVersion);
 
         var setupResponse = await client.PostAsJsonAsync(
             "/api/v1/User/setup",
             new SetupAdminDto
             {
                 Username = "initialadmin",
-                FirstName = "Initial",
-                LastName = "Admin",
                 Password = "AdminPassword123!"
             },
             TestContext.Current.CancellationToken);
@@ -362,8 +359,6 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
             new SetupAdminDto
             {
                 Username = "secondadmin",
-                FirstName = "Second",
-                LastName = "Admin",
                 Password = "AdminPassword123!"
             },
             TestContext.Current.CancellationToken);
@@ -381,8 +376,6 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
             new AddUserDto
             {
                 Username = "alice",
-                FirstName = "Alice",
-                LastName = "Developer",
                 Password = "AlicePassword123!",
                 UserTypeId = (int)PrimaryKeys.UserTypes.User
             },
@@ -394,8 +387,6 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
             new AddUserDto
             {
                 Username = "ci-bot",
-                FirstName = "CI",
-                LastName = "Runner",
                 Password = "CiBotPassword123!",
                 UserTypeId = (int)PrimaryKeys.UserTypes.Service
             },
@@ -462,13 +453,13 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
 
         var wrongCurrentResponse = await userClient.PutAsJsonAsync(
             "/api/v1/User/me/password",
-            new ChangePasswordDto { CurrentPassword = "wrong", Password = "new-password-123" },
+            new ChangePasswordDto { CurrentPassword = "wrong", Password = "New#Password123" },
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.BadRequest, wrongCurrentResponse.StatusCode);
 
         var changePasswordResponse = await userClient.PutAsJsonAsync(
             "/api/v1/User/me/password",
-            new ChangePasswordDto { CurrentPassword = "user", Password = "new-password-123" },
+            new ChangePasswordDto { CurrentPassword = "user", Password = "New#Password123" },
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, changePasswordResponse.StatusCode);
 
@@ -476,16 +467,67 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         Assert.Equal(HttpStatusCode.OK, (await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken)).StatusCode);
 
         // Login with new password works
-        Assert.Equal(HttpStatusCode.OK, (await LoginFromAsync("203.0.113.55", "User", "new-password-123")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await LoginFromAsync("203.0.113.55", "User", "New#Password123")).StatusCode);
 
         // Admin resets user's password back, which immediately revokes all active sessions for that user
         var resetPasswordResponse = await adminClient.PutAsJsonAsync(
             $"/api/v1/User/{(int)PrimaryKeys.UserTypes.User}/password",
-            new ResetPasswordDto { Password = "user" },
+            new ResetPasswordDto { Password = "Adm1n#ResetPass9" },
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, resetPasswordResponse.StatusCode);
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken)).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await LoginFromAsync("203.0.113.55", "User", "user")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await LoginFromAsync("203.0.113.55", "User", "Adm1n#ResetPass9")).StatusCode);
+    }
+
+    [Fact]
+    public async Task PasswordPolicy_And_Blacklist_AreEnforcedAcrossSetupAddChangeAndReset()
+    {
+        var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+
+        // 1. Weak passwords violating complexity policy (too short, no uppercase, no digit, no symbol, contains space)
+        string[] policyViolations = ["Short1!", "nouppercase1!", "NOLOWERCASE1!", "NoDigitsHere!", "NoSpecialChar123", "Has Space1!"];
+        foreach (var weak in policyViolations)
+        {
+            var res = await adminClient.PostAsJsonAsync(
+                "/api/v1/User",
+                new AddUserDto
+                {
+                    Username = "testuser",
+                    Password = weak,
+                    UserTypeId = (int)PrimaryKeys.UserTypes.User
+                },
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+            var problem = await res.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(ResponseMessages.PasswordPolicyViolation, problem!.Detail);
+        }
+
+        // 2. Blacklisted passwords (even though they meet complexity rules) and username-derived passwords
+        string[] blacklisted = ["Password123!", "Admin123!", "MobyGuard123!", "Welcome123!", "Qwerty123!", "testuser123!"];
+        foreach (var banned in blacklisted)
+        {
+            var res = await adminClient.PostAsJsonAsync(
+                "/api/v1/User",
+                new AddUserDto
+                {
+                    Username = "testuser",
+                    Password = banned,
+                    UserTypeId = (int)PrimaryKeys.UserTypes.User
+                },
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+            var problem = await res.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(ResponseMessages.PasswordBlacklisted, problem!.Detail);
+        }
+
+        // 3. ResetPassword also rejects blacklisted passwords
+        var resetBannedRes = await adminClient.PutAsJsonAsync(
+            $"/api/v1/User/{(int)PrimaryKeys.UserTypes.User}/password",
+            new ResetPasswordDto { Password = "Password123!" },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.BadRequest, resetBannedRes.StatusCode);
     }
 }

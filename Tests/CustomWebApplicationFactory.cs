@@ -94,8 +94,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             context.Users.Add(new User
             {
                 Id = (int)userType,
-                FirstName = name,
-                LastName = name,
                 Username = name,
                 Salt = salt,
                 Password = PasswordHasher.Hash(name.ToLowerInvariant(), salt),
