@@ -24,14 +24,11 @@ WORKDIR /src
 
 COPY MobyGuard/*.csproj ./MobyGuard/
 
-RUN --mount=type=cache,id=nuget,sharing=locked,target=/root/.nuget/packages \
-    dotnet restore ./MobyGuard/MobyGuard.csproj -a "${TARGETARCH/amd64/x64}" --use-current-runtime
+RUN dotnet restore ./MobyGuard/MobyGuard.csproj -a "${TARGETARCH/amd64/x64}" --use-current-runtime
 
 COPY MobyGuard/ ./MobyGuard/
-COPY --from=ui /MobyGuard/wwwroot ./MobyGuard/wwwroot/
 
-RUN --mount=type=cache,id=nuget,sharing=locked,target=/root/.nuget/packages \
-    dotnet publish ./MobyGuard/MobyGuard.csproj \
+RUN dotnet publish ./MobyGuard/MobyGuard.csproj \
       -c Release \
       -a "${TARGETARCH/amd64/x64}" \
       --use-current-runtime \
@@ -51,6 +48,7 @@ RUN apt-get update \
     && chown -R app:app /app
 
 COPY --from=build --chown=app:app /app/out .
+COPY --from=ui --chown=app:app /MobyGuard/wwwroot ./wwwroot
 
 USER app
 
