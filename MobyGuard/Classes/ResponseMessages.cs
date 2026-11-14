@@ -23,6 +23,8 @@ public class ResponseMessages
 
     public const string CannotChangeOwnTypeOrStatus = "_cannotChangeOwnTypeOrStatus";
 
+    public const string CannotModifyRootAdmin = "_cannotModifyRootAdmin";
+
     public const string InvalidCurrentPassword = "_invalidCurrentPassword";
 
     public const string PasswordPolicyViolation = "_passwordPolicyViolation";
@@ -55,4 +57,16 @@ public class ResponseMessages
     public const string RegistryManifestNotFound = "_registryManifestNotFound";
 
     public const string RegistryUpstreamError = "_registryUpstreamError";
+
+    public const string RetentionPolicyNotFound = "_retentionPolicyNotFound";
+
+    public const string RetentionPolicyExists = "_retentionPolicyAlreadyExists";
+
+    public const string InvalidRetentionPolicyRule = "_invalidRetentionPolicyRule";
+
+    public const string WebhookSubscriptionNotFound = "_webhookSubscriptionNotFound";
+
+    public const string WebhookSubscriptionExists = "_webhookSubscriptionAlreadyExists";
+
+    public const string InvalidWebhookSubscription = "_invalidWebhookSubscription";
 }

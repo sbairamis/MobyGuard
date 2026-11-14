@@ -14,6 +14,7 @@ using MobyGuard.Database.Dtos.RegistryDtos;
 using MobyGuard.Database.Dtos.TokenDtos;
 using MobyGuard.Database.Models;
 using MobyGuard.Enumerators;
+using MobyGuard.Services;
 
 namespace MobyGuard.Repos;
 
@@ -23,6 +24,7 @@ public class RegistryRepository(
     IHttpClientFactory httpClientFactory,
     IMemoryCache cache,
     IOptions<RegistryTokenOptions> registryOptions,
+    OutboundWebhookDispatcher webhookDispatcher,
     ILogger<RegistryRepository> logger)
 {
     private const string CatalogCacheKey = "registry:catalog:repositories";
@@ -566,6 +568,8 @@ public class RegistryRepository(
 
             await context.SaveChangesAsync();
 
+            await webhookDispatcher.DispatchEventAsync("delete", user.Username, repoName, refTrimmed);
+
             return Result.Success();
         }
         catch (HttpRequestException ex)
@@ -608,6 +612,7 @@ public class RegistryRepository(
             }
 
             var processed = 0;
+            var outboundNotifications = new List<(string Action, string Actor, string RepoName, string Reference)>();
 
             foreach (var ev in envelope.Events)
             {
@@ -658,12 +663,19 @@ public class RegistryRepository(
 
                 var clientIp = ExtractClientIpFromAddr(ev.Request?.Addr) ?? callerAddress?.ToString() ?? string.Empty;
 
+                var actorDisplay = !string.IsNullOrWhiteSpace(actorName) ? actorName : "anonymous";
+
                 context.AuditLogs.Add(new AuditLog(
-                    username: !string.IsNullOrWhiteSpace(actorName) ? actorName : "anonymous",
+                    username: actorDisplay,
                     repository: !string.IsNullOrWhiteSpace(reference) ? $"{repoName}:{reference}" : repoName,
                     actions: action,
                     description: description,
                     clientIp: clientIp));
+
+                if (action is "push" or "delete")
+                {
+                    outboundNotifications.Add((action, actorDisplay, repoName, reference));
+                }
 
                 processed++;
             }
@@ -671,6 +683,11 @@ public class RegistryRepository(
             if (processed > 0)
             {
                 await context.SaveChangesAsync();
+
+                foreach (var item in outboundNotifications)
+                {
+                    await webhookDispatcher.DispatchEventAsync(item.Action, item.Actor, item.RepoName, item.Reference);
+                }
             }
 
             return Result<RegistryWebhookResultDto>.Success(new RegistryWebhookResultDto
