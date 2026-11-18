@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using MobyGuard.Auth;
 using MobyGuard.Classes;
 using MobyGuard.Database.Context;
 using MobyGuard.Database.Dtos.UserDtos;
@@ -335,12 +336,31 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         Assert.True(statusBefore.SetupRequired);
         Assert.Equal("v1.0.8", statusBefore.ApiVersion);
 
+        var setupTokenService = _factory.Services.GetRequiredService<SetupTokenService>();
+        var activeSetupToken = setupTokenService.CurrentToken;
+        Assert.False(string.IsNullOrWhiteSpace(activeSetupToken));
+
+        // Attempt setup without or with wrong setup token -> 401 Unauthorized
+        var invalidTokenResponse = await client.PostAsJsonAsync(
+            "/api/v1/User/setup",
+            new SetupAdminDto
+            {
+                Username = "initialadmin",
+                Password = "AdminPassword123!",
+                SetupToken = "wrong-token"
+            },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, invalidTokenResponse.StatusCode);
+        var invalidTokenProblem = await invalidTokenResponse.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(ResponseMessages.InvalidSetupToken, invalidTokenProblem!.Detail);
+
         var setupResponse = await client.PostAsJsonAsync(
             "/api/v1/User/setup",
             new SetupAdminDto
             {
                 Username = "initialadmin",
-                Password = "AdminPassword123!"
+                Password = "AdminPassword123!",
+                SetupToken = activeSetupToken!
             },
             TestContext.Current.CancellationToken);
 
@@ -349,6 +369,7 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         Assert.NotNull(session);
         Assert.Equal("initialadmin", session.Username);
         Assert.Equal("Admin", session.UserType);
+        Assert.Null(setupTokenService.CurrentToken);
 
         var statusAfter = await client.GetFromJsonAsync<SetupStatusDto>("/api/v1/User/setup-status", TestContext.Current.CancellationToken);
         Assert.NotNull(statusAfter);
@@ -359,7 +380,8 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
             new SetupAdminDto
             {
                 Username = "secondadmin",
-                Password = "AdminPassword123!"
+                Password = "AdminPassword123!",
+                SetupToken = activeSetupToken!
             },
             TestContext.Current.CancellationToken);
 
@@ -600,5 +622,122 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
 
         var deleteSecondRes = await rootAdminClient.DeleteAsync($"/api/v1/User/{secondAdmin.Id}", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, deleteSecondRes.StatusCode);
+    }
+
+    [Fact]
+    public async Task UsernameValidation_And_CaseInsensitiveUniqueness_AreEnforcedAcrossAddUpdateAndConcurrentRequests()
+    {
+        var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+
+        // 1. Invalid username formats (colon, backticks, angle brackets, space, leading dot, too short, too long)
+        string[] invalidUsernames =
+        [
+            "a",
+            "user:name",
+            "`injected`",
+            "<http://evil|click>",
+            "has space",
+            ".leadingdot",
+            "-leadingdash",
+            new string('a', 65)
+        ];
+
+        foreach (var badName in invalidUsernames)
+        {
+            var addBadRes = await adminClient.PostAsJsonAsync(
+                "/api/v1/User",
+                new AddUserDto
+                {
+                    Username = badName,
+                    Password = "Valid!Pass2026#",
+                    UserTypeId = (int)PrimaryKeys.UserTypes.User
+                },
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(HttpStatusCode.BadRequest, addBadRes.StatusCode);
+            var problem = await addBadRes.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(ResponseMessages.InvalidUsername, problem!.Detail);
+
+            var updateBadRes = await adminClient.PutAsJsonAsync(
+                $"/api/v1/User/{(int)PrimaryKeys.UserTypes.User}",
+                new UpdateUserDto
+                {
+                    Username = badName,
+                    UserTypeId = (int)PrimaryKeys.UserTypes.User,
+                    IsActive = true
+                },
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(HttpStatusCode.BadRequest, updateBadRes.StatusCode);
+            var updateProblem = await updateBadRes.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(ResponseMessages.InvalidUsername, updateProblem!.Detail);
+        }
+
+        // 2. Case-insensitive uniqueness on Add ("Admin" already exists)
+        foreach (var duplicate in new[] { "Admin", "admin", "ADMIN", "  admin  " })
+        {
+            var dupRes = await adminClient.PostAsJsonAsync(
+                "/api/v1/User",
+                new AddUserDto
+                {
+                    Username = duplicate,
+                    Password = "Valid!Pass2026#",
+                    UserTypeId = (int)PrimaryKeys.UserTypes.User
+                },
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(HttpStatusCode.Conflict, dupRes.StatusCode);
+            var problem = await dupRes.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(ResponseMessages.UserExists, problem!.Detail);
+        }
+
+        // 3. Case-insensitive uniqueness on Update (cannot rename User #2 to "admin" or "SERVICE")
+        foreach (var takenName in new[] { "admin", "ADMIN", "service", "SERVICE" })
+        {
+            var dupUpdateRes = await adminClient.PutAsJsonAsync(
+                $"/api/v1/User/{(int)PrimaryKeys.UserTypes.User}",
+                new UpdateUserDto
+                {
+                    Username = takenName,
+                    UserTypeId = (int)PrimaryKeys.UserTypes.User,
+                    IsActive = true
+                },
+                TestContext.Current.CancellationToken);
+
+            Assert.Equal(HttpStatusCode.Conflict, dupUpdateRes.StatusCode);
+            var problem = await dupUpdateRes.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
+            Assert.Equal(ResponseMessages.UserExists, problem!.Detail);
+        }
+
+        // Updating a user's own username casing ("User" -> "user" -> "User") is allowed
+        var selfCaseUpdate = await adminClient.PutAsJsonAsync(
+            $"/api/v1/User/{(int)PrimaryKeys.UserTypes.User}",
+            new UpdateUserDto
+            {
+                Username = "user",
+                UserTypeId = (int)PrimaryKeys.UserTypes.User,
+                IsActive = true
+            },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, selfCaseUpdate.StatusCode);
+
+        // 4. Concurrent Add requests for the same username (with varying casing) allow only one to succeed
+        string[] concurrentCandidates = ["concurrent.user_1", "CONCURRENT.USER_1", "Concurrent.User_1", "concurrent.user_1"];
+        var tasks = concurrentCandidates
+            .Select(name => adminClient.PostAsJsonAsync(
+                "/api/v1/User",
+                new AddUserDto
+                {
+                    Username = name,
+                    Password = "Valid!Pass2026#",
+                    UserTypeId = (int)PrimaryKeys.UserTypes.User
+                },
+                TestContext.Current.CancellationToken))
+            .ToArray();
+
+        var responses = await Task.WhenAll(tasks);
+
+        Assert.Single(responses, r => r.StatusCode == HttpStatusCode.Created);
+        Assert.Equal(3, responses.Count(r => r.StatusCode == HttpStatusCode.Conflict));
     }
 }

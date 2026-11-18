@@ -3,6 +3,7 @@ using System.Linq.Expressions;
 using System.Net;
 using System.Security.Claims;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -18,21 +19,46 @@ using MobyGuard.Pagination;
 
 namespace MobyGuard.Repos;
 
-public class UserRepository(
+public partial class UserRepository(
     DatabaseContext context,
     IOptions<JwtOptions> jwtOptions,
     IUriService uriService,
     ILogger<UserRepository> logger,
-    SessionService sessionService)
+    SessionService sessionService,
+    SetupTokenService setupTokenService)
 {
     private const int RootAdminUserId = 1;
+    private static readonly SemaphoreSlim UserMutationLock = new(1, 1);
     private readonly JwtOptions _jwtOptions = jwtOptions.Value;
+
+    [GeneratedRegex(@"^[a-zA-Z0-9][a-zA-Z0-9._-]{1,63}$", RegexOptions.Compiled)]
+    private static partial Regex UsernameRegex();
+
+    public static bool IsValidUsername(string? username)
+        => !string.IsNullOrWhiteSpace(username) && UsernameRegex().IsMatch(username);
+
+    private async Task<bool> IsUsernameTakenAsync(string normalizedUsername, int? excludeUserId = null)
+    {
+        var normalizedLower = normalizedUsername.ToLowerInvariant();
+        return excludeUserId.HasValue
+            ? await context.Users.AnyAsync(u => u.Id != excludeUserId.Value && u.Username.ToLower() == normalizedLower)
+            : await context.Users.AnyAsync(u => u.Username.ToLower() == normalizedLower);
+    }
 
     public async Task<Result<SetupStatusDto>> GetSetupStatus()
     {
         try
         {
             var hasUsers = await context.Users.AnyAsync();
+            if (!hasUsers)
+            {
+                setupTokenService.EnsureTokenGenerated();
+            }
+            else
+            {
+                setupTokenService.InvalidateToken();
+            }
+
             return Result<SetupStatusDto>.Success(new SetupStatusDto
             {
                 SetupRequired = !hasUsers,
@@ -50,55 +76,83 @@ public class UserRepository(
     {
         try
         {
-            if (await context.Users.AnyAsync())
+            var normalizedUsername = dto.Username?.Trim() ?? string.Empty;
+
+            await UserMutationLock.WaitAsync();
+            try
             {
-                return Result<LoginResponseDto>.Failure(RepositoryStatus.Conflict, ResponseMessages.SetupAlreadyCompleted);
+                await using var transaction = await context.Database.BeginTransactionAsync();
+
+                if (await context.Users.AnyAsync())
+                {
+                    setupTokenService.InvalidateToken();
+                    return Result<LoginResponseDto>.Failure(RepositoryStatus.Conflict, ResponseMessages.SetupAlreadyCompleted);
+                }
+
+                setupTokenService.EnsureTokenGenerated();
+
+                if (!setupTokenService.VerifyToken(dto.SetupToken))
+                {
+                    return Result<LoginResponseDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidSetupToken);
+                }
+
+                if (!IsValidUsername(normalizedUsername))
+                {
+                    return Result<LoginResponseDto>.Failure(RepositoryStatus.BadRequest, ResponseMessages.InvalidUsername);
+                }
+
+                var (isValidPassword, passwordError) = PasswordPolicyValidator.Validate(dto.Password, normalizedUsername);
+                if (!isValidPassword)
+                {
+                    return Result<LoginResponseDto>.Failure(RepositoryStatus.BadRequest, passwordError);
+                }
+
+                var adminType = await context.UserTypes.FirstOrDefaultAsync(ut => ut.Type == Roles.Admin);
+                if (adminType is null)
+                {
+                    return Result<LoginResponseDto>.Failure(RepositoryStatus.BadRequest, ResponseMessages.UserTypeNotFound);
+                }
+
+                var salt = PasswordHasher.GenerateSalt();
+                var now = DateTime.UtcNow;
+
+                var user = new User
+                {
+                    Username = normalizedUsername,
+                    Password = PasswordHasher.Hash(dto.Password, salt),
+                    Salt = salt,
+                    IsActive = true,
+                    UserTypeId = adminType.Id,
+                    LastLogin = now,
+                    CreatedAt = now,
+                    UpdatedAt = now
+                };
+
+                context.Users.Add(user);
+                context.AuditLogs.Add(new AuditLog(
+                    username: user.Username,
+                    description: nameof(AuditLogEnums.Description.User_Created)));
+
+                await context.SaveChangesAsync();
+                await transaction.CommitAsync();
+
+                setupTokenService.InvalidateToken();
+
+                var (accessToken, refreshToken) = await IssueAuthTokens(user.Id, user.Username, adminType.Type);
+
+                return Result<LoginResponseDto>.Success(new LoginResponseDto
+                {
+                    Id = user.Id,
+                    Username = user.Username,
+                    UserType = adminType.Type,
+                    Token = accessToken,
+                    RefreshToken = refreshToken
+                });
             }
-
-            var (isValidPassword, passwordError) = PasswordPolicyValidator.Validate(dto.Password, dto.Username);
-            if (!isValidPassword)
+            finally
             {
-                return Result<LoginResponseDto>.Failure(RepositoryStatus.BadRequest, passwordError);
+                UserMutationLock.Release();
             }
-
-            var adminType = await context.UserTypes.FirstOrDefaultAsync(ut => ut.Type == Roles.Admin);
-            if (adminType is null)
-            {
-                return Result<LoginResponseDto>.Failure(RepositoryStatus.BadRequest, ResponseMessages.UserTypeNotFound);
-            }
-
-            var salt = PasswordHasher.GenerateSalt();
-            var now = DateTime.UtcNow;
-
-            var user = new User
-            {
-                Username = dto.Username.Trim(),
-                Password = PasswordHasher.Hash(dto.Password, salt),
-                Salt = salt,
-                IsActive = true,
-                UserTypeId = adminType.Id,
-                LastLogin = now,
-                CreatedAt = now,
-                UpdatedAt = now
-            };
-
-            context.Users.Add(user);
-            context.AuditLogs.Add(new AuditLog(
-                username: user.Username,
-                description: nameof(AuditLogEnums.Description.User_Created)));
-
-            await context.SaveChangesAsync();
-
-            var (accessToken, refreshToken) = await IssueAuthTokens(user.Id, user.Username, adminType.Type);
-
-            return Result<LoginResponseDto>.Success(new LoginResponseDto
-            {
-                Id = user.Id,
-                Username = user.Username,
-                UserType = adminType.Type,
-                Token = accessToken,
-                RefreshToken = refreshToken
-            });
         }
         catch (Exception ex)
         {
@@ -309,58 +363,73 @@ public class UserRepository(
     {
         try
         {
-            if (await context.Users.AnyAsync(user => user.Username == addUserDto.Username))
+            var normalizedUsername = addUserDto.Username?.Trim() ?? string.Empty;
+
+            if (!IsValidUsername(normalizedUsername))
             {
-                return Result<UserDto>.Failure(RepositoryStatus.Conflict, ResponseMessages.UserExists);
+                return Result<UserDto>.Failure(RepositoryStatus.BadRequest, ResponseMessages.InvalidUsername);
             }
 
-            var (isValidPassword, passwordError) = PasswordPolicyValidator.Validate(addUserDto.Password, addUserDto.Username);
-            if (!isValidPassword)
+            await UserMutationLock.WaitAsync();
+            try
             {
-                return Result<UserDto>.Failure(RepositoryStatus.BadRequest, passwordError);
+                if (await IsUsernameTakenAsync(normalizedUsername))
+                {
+                    return Result<UserDto>.Failure(RepositoryStatus.Conflict, ResponseMessages.UserExists);
+                }
+
+                var (isValidPassword, passwordError) = PasswordPolicyValidator.Validate(addUserDto.Password, normalizedUsername);
+                if (!isValidPassword)
+                {
+                    return Result<UserDto>.Failure(RepositoryStatus.BadRequest, passwordError);
+                }
+
+                var userType = await context.UserTypes.FirstOrDefaultAsync(ut => ut.Id == addUserDto.UserTypeId);
+
+                if (userType is null)
+                {
+                    return Result<UserDto>.Failure(RepositoryStatus.BadRequest, ResponseMessages.UserTypeNotFound);
+                }
+
+                var salt = PasswordHasher.GenerateSalt();
+
+                var user = new User
+                {
+                    Username = normalizedUsername,
+                    Password = PasswordHasher.Hash(addUserDto.Password, salt),
+                    Salt = salt,
+                    IsActive = true,
+                    UserTypeId = userType.Id,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+
+                context.Users.Add(user);
+
+                var auditLog = new AuditLog(
+                    username: normalizedUsername,
+                    description: nameof(AuditLogEnums.Description.User_Created));
+
+                context.AuditLogs.Add(auditLog);
+
+                await context.SaveChangesAsync();
+
+                return Result<UserDto>.Success(new UserDto
+                {
+                    Id = user.Id,
+                    Username = user.Username,
+                    IsActive = user.IsActive,
+                    LastLogin = user.LastLogin,
+                    UserTypeId = user.UserTypeId,
+                    UserType = userType.Type,
+                    CreatedAt = user.CreatedAt,
+                    UpdatedAt = user.UpdatedAt
+                });
             }
-
-            var userType = await context.UserTypes.FirstOrDefaultAsync(ut => ut.Id == addUserDto.UserTypeId);
-
-            if (userType is null)
+            finally
             {
-                return Result<UserDto>.Failure(RepositoryStatus.BadRequest, ResponseMessages.UserTypeNotFound);
+                UserMutationLock.Release();
             }
-
-            var salt = PasswordHasher.GenerateSalt();
-
-            var user = new User
-            {
-                Username = addUserDto.Username,
-                Password = PasswordHasher.Hash(addUserDto.Password, salt),
-                Salt = salt,
-                IsActive = true,
-                UserTypeId = userType.Id,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-
-            context.Users.Add(user);
-
-            var auditLog = new AuditLog(
-                username: addUserDto.Username,
-                description: nameof(AuditLogEnums.Description.User_Created));
-
-            context.AuditLogs.Add(auditLog);
-
-            await context.SaveChangesAsync();
-
-            return Result<UserDto>.Success(new UserDto
-            {
-                Id = user.Id,
-                Username = user.Username,
-                IsActive = user.IsActive,
-                LastLogin = user.LastLogin,
-                UserTypeId = user.UserTypeId,
-                UserType = userType.Type,
-                CreatedAt = user.CreatedAt,
-                UpdatedAt = user.UpdatedAt
-            });
         }
         catch (Exception ex)
         {
@@ -399,57 +468,71 @@ public class UserRepository(
     {
         try
         {
-            var user = await context.Users.FindAsync(id);
+            var normalizedUsername = updateUserDto.Username?.Trim() ?? string.Empty;
 
-            if (user is null)
+            await UserMutationLock.WaitAsync();
+            try
             {
-                return Result.Failure(RepositoryStatus.NotFound, ResponseMessages.UserNotFound);
-            }
+                var user = await context.Users.FindAsync(id);
 
-            // An admin who demoted or deactivated themselves could leave no active admin behind.
-            if (user.Id == callerId && (updateUserDto.UserTypeId != user.UserTypeId || !updateUserDto.IsActive))
+                if (user is null)
+                {
+                    return Result.Failure(RepositoryStatus.NotFound, ResponseMessages.UserNotFound);
+                }
+
+                // An admin who demoted or deactivated themselves could leave no active admin behind.
+                if (user.Id == callerId && (updateUserDto.UserTypeId != user.UserTypeId || !updateUserDto.IsActive))
+                {
+                    return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.CannotChangeOwnTypeOrStatus);
+                }
+
+                // Protect the initial bootstrap root admin (Id == 1) from being demoted, disabled, or modified by other admins.
+                if (user.Id == RootAdminUserId && (callerId != RootAdminUserId || updateUserDto.UserTypeId != user.UserTypeId || !updateUserDto.IsActive))
+                {
+                    return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.CannotModifyRootAdmin);
+                }
+
+                if (!IsValidUsername(normalizedUsername))
+                {
+                    return Result.Failure(RepositoryStatus.BadRequest, ResponseMessages.InvalidUsername);
+                }
+
+                if (await IsUsernameTakenAsync(normalizedUsername, user.Id))
+                {
+                    return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.UserExists);
+                }
+
+                if (!await context.UserTypes.AnyAsync(userType => userType.Id == updateUserDto.UserTypeId))
+                {
+                    return Result.Failure(RepositoryStatus.BadRequest, ResponseMessages.UserTypeNotFound);
+                }
+
+                var shouldInvalidateSessions = !updateUserDto.IsActive
+                                               || updateUserDto.UserTypeId != user.UserTypeId
+                                               || normalizedUsername != user.Username;
+
+                user.Username = normalizedUsername;
+                user.UserTypeId = updateUserDto.UserTypeId;
+                user.IsActive = updateUserDto.IsActive;
+                user.UpdatedAt = DateTime.UtcNow;
+
+                await context.SaveChangesAsync();
+
+                if (shouldInvalidateSessions)
+                {
+                    await sessionService.DeleteUserEntries(id);
+                }
+                else
+                {
+                    sessionService.ClearAllUserLoginRetries(id);
+                }
+
+                return Result.Success();
+            }
+            finally
             {
-                return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.CannotChangeOwnTypeOrStatus);
+                UserMutationLock.Release();
             }
-
-            // Protect the initial bootstrap root admin (Id == 1) from being demoted, disabled, or modified by other admins.
-            if (user.Id == RootAdminUserId && (callerId != RootAdminUserId || updateUserDto.UserTypeId != user.UserTypeId || !updateUserDto.IsActive))
-            {
-                return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.CannotModifyRootAdmin);
-            }
-
-            if (updateUserDto.Username != user.Username
-                && await context.Users.AnyAsync(other => other.Id != user.Id && other.Username == updateUserDto.Username))
-            {
-                return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.UserExists);
-            }
-
-            if (!await context.UserTypes.AnyAsync(userType => userType.Id == updateUserDto.UserTypeId))
-            {
-                return Result.Failure(RepositoryStatus.BadRequest, ResponseMessages.UserTypeNotFound);
-            }
-
-            var shouldInvalidateSessions = !updateUserDto.IsActive
-                                           || updateUserDto.UserTypeId != user.UserTypeId
-                                           || updateUserDto.Username != user.Username;
-
-            user.Username = updateUserDto.Username;
-            user.UserTypeId = updateUserDto.UserTypeId;
-            user.IsActive = updateUserDto.IsActive;
-            user.UpdatedAt = DateTime.UtcNow;
-
-            await context.SaveChangesAsync();
-
-            if (shouldInvalidateSessions)
-            {
-                await sessionService.DeleteUserEntries(id);
-            }
-            else
-            {
-                sessionService.ClearAllUserLoginRetries(id);
-            }
-
-            return Result.Success();
         }
         catch (Exception ex)
         {

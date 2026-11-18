@@ -87,6 +87,7 @@ builder.Services.AddHealthChecks()
 
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<SessionCacheService>();
+builder.Services.AddSingleton<SetupTokenService>();
 builder.Services.AddScoped<SessionService>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
@@ -187,6 +188,11 @@ using (var scope = app.Services.CreateScope())
     dbContext.AuditLogs.Where(log => log.CreatedAt < retentionCutoff).ExecuteDelete();
 
     DbInitializer.Initialize(dbContext);
+
+    if (!dbContext.Users.Any())
+    {
+        services.GetRequiredService<SetupTokenService>().EnsureTokenGenerated();
+    }
 }
 
 if (app.Environment.IsDevelopment())

@@ -19,6 +19,8 @@ public class ResponseMessages
 
     public const string UserExists = "_userAlreadyExists";
 
+    public const string InvalidUsername = "_invalidUsername";
+
     public const string CannotDeleteYourself = "_cannotDeleteYourself";
 
     public const string CannotChangeOwnTypeOrStatus = "_cannotChangeOwnTypeOrStatus";
@@ -51,6 +53,8 @@ public class ResponseMessages
 
 
     public const string SetupAlreadyCompleted = "_setupAlreadyCompleted";
+
+    public const string InvalidSetupToken = "_invalidSetupToken";
 
     public const string RegistryRepositoryAccessDenied = "_registryRepositoryAccessDenied";
 

@@ -4,6 +4,7 @@ import { api } from '../api'
 export default function AuthPage({ setupRequired, onAuthenticated, notify }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [setupToken, setSetupToken] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -15,7 +16,8 @@ export default function AuthPage({ setupRequired, onAuthenticated, notify }) {
       if (setupRequired) {
         const res = await api.post('/api/v1/User/setup', {
           username: username.trim(),
-          password
+          password,
+          setupToken: setupToken.trim()
         })
         notify('Initial Admin account created.', 'ok')
         onAuthenticated(res)
@@ -65,12 +67,29 @@ export default function AuthPage({ setupRequired, onAuthenticated, notify }) {
           </div>
         )}
 
+        {setupRequired && (
+          <label className="field">
+            One-Time Setup Token
+            <input
+              type="password"
+              required
+              autoFocus
+              value={setupToken}
+              onChange={(e) => setSetupToken(e.target.value)}
+              placeholder="Paste token from container logs…"
+            />
+            <span className="muted" style={{ fontSize: 11.5 }}>
+              Printed to the MobyGuard container logs on first startup.
+            </span>
+          </label>
+        )}
+
         <label className="field">
           Username
           <input
             type="text"
             required
-            autoFocus
+            autoFocus={!setupRequired}
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             placeholder="admin"
