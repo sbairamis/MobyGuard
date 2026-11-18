@@ -189,7 +189,6 @@ export default function App() {
           </div>
           <div className="brand-text">
             <b>MobyGuard</b>
-            <span>Registry v3 Control Plane</span>
           </div>
         </div>
 
@@ -257,7 +256,7 @@ export default function App() {
 
         <PageComponent user={user} notify={notify} />
         <footer className="app-footer">
-          <span>MobyGuard — Registry v3 Control Plane</span>
+          <span>MobyGuard</span>
           {version && <span className="mono">{version}</span>}
         </footer>
       </main>
