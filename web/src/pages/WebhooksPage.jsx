@@ -40,6 +40,15 @@ export default function WebhooksPage({ notify }) {
     loadSubscriptions()
   }, [])
 
+  useEffect(() => {
+    if (!modalOpen) return
+    function onKeyDown(e) {
+      if (e.key === 'Escape') setModalOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [modalOpen])
+
   function openCreateModal() {
     setEditingSub(null)
     setName('')
@@ -149,7 +158,7 @@ export default function WebhooksPage({ notify }) {
         </button>
       </div>
 
-      <div className="card" style={{ marginBottom: 14, padding: '12px 16px' }}>
+      <div className="card filter-bar">
         <form className="row" onSubmit={(e) => e.preventDefault()}>
           <select
             value={searchBy}
@@ -279,7 +288,7 @@ export default function WebhooksPage({ notify }) {
                         <button className="sm" onClick={() => openEditModal(sub)}>
                           <Icon name="edit" size={13} /> Edit
                         </button>
-                        <button className="danger sm" onClick={() => handleDelete(sub)}>
+                        <button className="danger sm" aria-label={`Delete webhook ${sub.name}`} onClick={() => handleDelete(sub)}>
                           <Icon name="trash" size={13} />
                         </button>
                       </div>
@@ -294,12 +303,15 @@ export default function WebhooksPage({ notify }) {
 
       {modalOpen && (
         <div className="modal-backdrop" onClick={() => setModalOpen(false)}>
-          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSave}>
+          <form className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} onSubmit={handleSave}>
             <div className="modal-head">
               <h2>{editingSub ? `Edit Webhook: ${editingSub.name}` : 'Create Outbound Webhook'}</h2>
+              <button type="button" className="ghost icon-btn sm" aria-label="Close modal" onClick={() => setModalOpen(false)}>
+                <Icon name="close" size={15} />
+              </button>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div className="form-grid-2">
               <label className="field">
                 Webhook Name
                 <input

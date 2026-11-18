@@ -69,6 +69,15 @@ export default function PermissionsPage({ user, notify }) {
     loadUsersForDropdown()
   }, [])
 
+  useEffect(() => {
+    if (!modalOpen) return
+    function onKeyDown(e) {
+      if (e.key === 'Escape') setModalOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [modalOpen])
+
   function openAddModal() {
     setEditingRule(null)
     setFormUserId(usersList[0]?.id ? String(usersList[0].id) : '')
@@ -150,7 +159,7 @@ export default function PermissionsPage({ user, notify }) {
       </div>
 
       {isAdmin && (
-        <div className="card" style={{ marginBottom: 14, padding: '12px 16px' }}>
+        <div className="card filter-bar">
           <form
             className="row"
             onSubmit={(e) => {
@@ -263,7 +272,7 @@ export default function PermissionsPage({ user, notify }) {
                           <button className="sm" onClick={() => openEditModal(rule)}>
                             <Icon name="edit" size={13} /> Edit
                           </button>
-                          <button className="danger sm" onClick={() => handleDeleteRule(rule)}>
+                          <button className="danger sm" aria-label={`Delete permission rule ${rule.repositoryPattern}`} onClick={() => handleDeleteRule(rule)}>
                             <Icon name="trash" size={13} />
                           </button>
                         </div>
@@ -277,7 +286,7 @@ export default function PermissionsPage({ user, notify }) {
         </div>
 
         {isAdmin && totalPages > 1 && (
-          <div className="row" style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', justifyContent: 'space-between' }}>
+          <div className="pagination-bar">
             <span className="muted" style={{ fontSize: 12.5 }}>
               Page {pageNumber} of {totalPages} ({totalRecords} policies)
             </span>
@@ -311,9 +320,12 @@ export default function PermissionsPage({ user, notify }) {
 
       {modalOpen && (
         <div className="modal-backdrop" onClick={() => setModalOpen(false)}>
-          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSaveRule}>
+          <form className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} onSubmit={handleSaveRule}>
             <div className="modal-head">
               <h2>{editingRule ? `Edit Policy #${editingRule.id}` : 'Create Repository Permission Policy'}</h2>
+              <button type="button" className="ghost icon-btn sm" aria-label="Close modal" onClick={() => setModalOpen(false)}>
+                <Icon name="close" size={15} />
+              </button>
             </div>
 
             {!editingRule ? (

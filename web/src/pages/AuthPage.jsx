@@ -1,19 +1,31 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../api'
 
 export default function AuthPage({ setupRequired, onAuthenticated, notify }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [setupToken, setSetupToken] = useState('')
+  const [tokenVerified, setTokenVerified] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!setupRequired) {
+      setTokenVerified(false)
+    }
+  }, [setupRequired])
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
-      if (setupRequired) {
+      if (setupRequired && !tokenVerified) {
+        await api.post('/api/v1/User/verify-setup-token', {
+          setupToken: setupToken.trim()
+        })
+        setTokenVerified(true)
+      } else if (setupRequired && tokenVerified) {
         const res = await api.post('/api/v1/User/setup', {
           username: username.trim(),
           password,
@@ -44,77 +56,93 @@ export default function AuthPage({ setupRequired, onAuthenticated, notify }) {
           </div>
           <div className="brand-text">
             <b style={{ fontSize: 18 }}>MobyGuard</b>
-            {setupRequired && <span>Create Initial Admin Account</span>}
+            {setupRequired && (
+              <span>
+                {tokenVerified ? 'Create Initial Admin Account' : 'Verify One-Time Setup Token'}
+              </span>
+            )}
           </div>
         </div>
 
-        {setupRequired && (
+        {setupRequired && !tokenVerified && (
           <p className="sub" style={{ fontSize: 13, margin: 0 }}>
-            No users exist yet. Create the primary Administrator account to get started.
+            Enter the one-time setup token printed to the MobyGuard container logs to unlock initial administrator setup.
+          </p>
+        )}
+
+        {setupRequired && tokenVerified && (
+          <p className="sub" style={{ fontSize: 13, margin: 0 }}>
+            Setup token verified. Create the primary Administrator account to get started.
           </p>
         )}
 
         {error && (
-          <div style={{
-            padding: '9px 12px',
-            borderRadius: 'var(--r-sm)',
-            background: 'color-mix(in srgb, var(--err) 12%, transparent)',
-            border: '1px solid color-mix(in srgb, var(--err) 35%, transparent)',
-            color: 'var(--err)',
-            fontSize: 13
-          }}>
+          <div className="alert-banner-err" role="alert">
             {error}
           </div>
         )}
 
-        {setupRequired && (
+        {setupRequired && !tokenVerified ? (
           <label className="field">
             One-Time Setup Token
             <input
               type="password"
               required
               autoFocus
+              autoComplete="one-time-code"
               value={setupToken}
               onChange={(e) => setSetupToken(e.target.value)}
               placeholder="Paste token from container logs…"
             />
-            <span className="muted" style={{ fontSize: 11.5 }}>
+            <span className="field-hint">
               Printed to the MobyGuard container logs on first startup.
             </span>
           </label>
+        ) : (
+          <>
+            <label className="field">
+              Username
+              <input
+                type="text"
+                required
+                autoFocus
+                autoComplete="username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="admin"
+              />
+            </label>
+
+            <label className="field">
+              Password
+              <input
+                type="password"
+                required
+                minLength={setupRequired ? 8 : 1}
+                autoComplete={setupRequired ? 'new-password' : 'current-password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+              />
+              {setupRequired && (
+                <span className="field-hint">
+                  Must be 8–64 characters with uppercase, lowercase, number, and symbol.
+                </span>
+              )}
+            </label>
+          </>
         )}
 
-        <label className="field">
-          Username
-          <input
-            type="text"
-            required
-            autoFocus={!setupRequired}
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="admin"
-          />
-        </label>
-
-        <label className="field">
-          Password
-          <input
-            type="password"
-            required
-            minLength={setupRequired ? 8 : 1}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-          />
-          {setupRequired && (
-            <span className="muted" style={{ fontSize: 11.5 }}>
-              Must be 8–64 characters with uppercase, lowercase, number, and symbol.
-            </span>
-          )}
-        </label>
-
         <button type="submit" className="primary" disabled={loading} style={{ height: 38, marginTop: 4 }}>
-          {loading ? <span className="spin" /> : (setupRequired ? 'Complete Setup & Sign In' : 'Sign In')}
+          {loading ? (
+            <span className="spin" />
+          ) : setupRequired && !tokenVerified ? (
+            'Verify Setup Token'
+          ) : setupRequired ? (
+            'Complete Setup & Sign In'
+          ) : (
+            'Sign In'
+          )}
         </button>
       </form>
     </div>

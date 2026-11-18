@@ -62,6 +62,15 @@ export default function UsersPage({ user: currentUser, notify }) {
     loadUsers(1)
   }, [])
 
+  useEffect(() => {
+    if (!modalMode) return
+    function onKeyDown(e) {
+      if (e.key === 'Escape') setModalMode(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [modalMode])
+
   function openAddModal() {
     setSelectedUser(null)
     setUsername('')
@@ -148,7 +157,7 @@ export default function UsersPage({ user: currentUser, notify }) {
         )}
       </div>
 
-      <div className="card" style={{ marginBottom: 14, padding: '12px 16px' }}>
+      <div className="card filter-bar">
         <form
           className="row"
           onSubmit={(e) => {
@@ -282,7 +291,7 @@ export default function UsersPage({ user: currentUser, notify }) {
                             </>
                           )}
                           {u.id !== currentUser?.id && u.id !== 1 && (
-                            <button className="danger sm" title="Delete user" onClick={() => handleDeleteUser(u)}>
+                            <button className="danger sm" aria-label={`Delete user ${u.username}`} title="Delete user" onClick={() => handleDeleteUser(u)}>
                               <Icon name="trash" size={13} />
                             </button>
                           )}
@@ -297,7 +306,7 @@ export default function UsersPage({ user: currentUser, notify }) {
         </div>
 
         {totalPages > 1 && (
-          <div className="row" style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', justifyContent: 'space-between' }}>
+          <div className="pagination-bar">
             <span className="muted" style={{ fontSize: 12.5 }}>
               Page {pageNumber} of {totalPages} ({totalRecords} accounts)
             </span>
@@ -331,13 +340,16 @@ export default function UsersPage({ user: currentUser, notify }) {
 
       {modalMode && (
         <div className="modal-backdrop" onClick={() => setModalMode(null)}>
-          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
+          <form className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} onSubmit={handleSubmit}>
             <div className="modal-head">
               <h2>
                 {modalMode === 'add' && 'Create User / Service Account'}
                 {modalMode === 'edit' && `Edit Account: ${selectedUser?.username}`}
                 {modalMode === 'password' && `Reset Password: ${selectedUser?.username}`}
               </h2>
+              <button type="button" className="ghost icon-btn sm" aria-label="Close modal" onClick={() => setModalMode(null)}>
+                <Icon name="close" size={15} />
+              </button>
             </div>
 
             {modalMode === 'password' ? (
@@ -348,22 +360,24 @@ export default function UsersPage({ user: currentUser, notify }) {
                   required
                   minLength={8}
                   autoFocus
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter new password…"
                 />
-                <span className="muted" style={{ fontSize: 11.5 }}>
+                <span className="field-hint">
                   Must be 8–64 characters with uppercase, lowercase, number, and symbol.
                 </span>
               </label>
             ) : (
               <>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <div className="form-grid-2">
                   <label className="field">
                     Username
                     <input
                       type="text"
                       required
+                      autoComplete="off"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       placeholder="ci-deployer"
@@ -390,10 +404,11 @@ export default function UsersPage({ user: currentUser, notify }) {
                       type="password"
                       required
                       minLength={8}
+                      autoComplete="new-password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                     />
-                    <span className="muted" style={{ fontSize: 11.5 }}>
+                    <span className="field-hint">
                       Must be 8–64 characters with uppercase, lowercase, number, and symbol.
                     </span>
                   </label>

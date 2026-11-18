@@ -1,5 +1,4 @@
 const STORAGE_KEY = 'mobyguard_session'
-export const DASHBOARD_VERSION = 'v1.0.8'
 
 const ERROR_MESSAGES = {
   _invalidCredentials: 'Invalid username or password.',
@@ -85,7 +84,7 @@ async function request(method, path, body) {
   const data = isJson ? await res.json().catch(() => null) : await res.text().catch(() => '')
 
   if (!res.ok) {
-    const isAuthEndpoint = path.includes('/login') || path.includes('/setup')
+    const isAuthEndpoint = path.includes('/login') || path.includes('/setup') || path.includes('/verify-setup-token')
     if (res.status === 401 && !isAuthEndpoint) {
       saveSession(null)
       window.dispatchEvent(new CustomEvent('mobyguard:unauthorized'))

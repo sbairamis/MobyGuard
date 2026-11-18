@@ -22,6 +22,15 @@ export default function ProfilePage({ notify }) {
       .finally(() => setLoadingProfile(false))
   }, [])
 
+  useEffect(() => {
+    if (!showPasswordModal) return
+    function onKeyDown(e) {
+      if (e.key === 'Escape') setShowPasswordModal(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [showPasswordModal])
+
   function openPasswordModal() {
     setCurrentPassword('')
     setNewPassword('')
@@ -64,7 +73,7 @@ export default function ProfilePage({ notify }) {
         {loadingProfile ? (
           <div className="empty"><span className="spin" /></div>
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div className="form-grid-2">
             <label className="field">
               Username
               <input type="text" value={profile?.username || ''} disabled />
@@ -87,9 +96,12 @@ export default function ProfilePage({ notify }) {
 
       {showPasswordModal && (
         <div className="modal-backdrop" onClick={() => setShowPasswordModal(false)}>
-          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleChangePassword}>
+          <form className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} onSubmit={handleChangePassword}>
             <div className="modal-head">
               <h2>Change Password</h2>
+              <button type="button" className="ghost icon-btn sm" aria-label="Close modal" onClick={() => setShowPasswordModal(false)}>
+                <Icon name="close" size={15} />
+              </button>
             </div>
 
             <p className="muted" style={{ margin: 0, fontSize: 13 }}>
@@ -102,6 +114,7 @@ export default function ProfilePage({ notify }) {
                 type="password"
                 required
                 autoFocus
+                autoComplete="current-password"
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
               />
@@ -113,10 +126,11 @@ export default function ProfilePage({ notify }) {
                 type="password"
                 required
                 minLength={8}
+                autoComplete="new-password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
               />
-              <span className="muted" style={{ fontSize: 11.5 }}>
+              <span className="field-hint">
                 Must be 8–64 characters with uppercase, lowercase, number, and symbol (not blacklisted).
               </span>
             </label>

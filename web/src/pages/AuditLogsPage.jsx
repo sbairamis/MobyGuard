@@ -22,16 +22,16 @@ export default function AuditLogsPage({ notify }) {
     } catch {}
   }
 
-  async function loadLogs(page = pageNumber) {
+  async function loadLogs(page = pageNumber, overrideSearchBy = searchBy, overrideValue = valueStr) {
     setLoading(true)
     try {
       const params = new URLSearchParams({
         PageNumber: String(page),
         PageSize: String(pageSize),
-        SearchBy: searchBy
+        SearchBy: overrideSearchBy
       })
-      if (valueStr.trim()) {
-        params.set('ValueStr', valueStr.trim())
+      if (overrideValue.trim()) {
+        params.set('ValueStr', overrideValue.trim())
       }
 
       const res = await api.get(`/api/v1/AuditLog?${params.toString()}`)
@@ -63,7 +63,7 @@ export default function AuditLogsPage({ notify }) {
         </button>
       </div>
 
-      <div className="card" style={{ marginBottom: 14, padding: '12px 16px' }}>
+      <div className="card filter-bar">
         <form
           className="row"
           onSubmit={(e) => {
@@ -122,7 +122,7 @@ export default function AuditLogsPage({ notify }) {
                 setSearchBy('0')
                 setValueStr('')
                 setPageNumber(1)
-                setTimeout(() => loadLogs(1), 0)
+                loadLogs(1, '0', '')
               }}
             >
               Clear
@@ -186,7 +186,7 @@ export default function AuditLogsPage({ notify }) {
         </div>
 
         {totalPages > 1 && (
-          <div className="row" style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', justifyContent: 'space-between' }}>
+          <div className="pagination-bar">
             <span className="muted" style={{ fontSize: 12.5 }}>
               Page {pageNumber} of {totalPages} ({totalRecords} events)
             </span>

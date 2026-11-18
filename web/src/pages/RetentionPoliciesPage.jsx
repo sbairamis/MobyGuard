@@ -40,6 +40,18 @@ export default function RetentionPoliciesPage({ notify }) {
     loadPolicies()
   }, [])
 
+  useEffect(() => {
+    if (!modalOpen && !executionReport) return
+    function onKeyDown(e) {
+      if (e.key === 'Escape') {
+        if (executionReport) setExecutionReport(null)
+        else setModalOpen(false)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [modalOpen, executionReport])
+
   function openCreateModal() {
     setEditingPolicy(null)
     setName('')
@@ -147,7 +159,7 @@ export default function RetentionPoliciesPage({ notify }) {
         </button>
       </div>
 
-      <div className="card" style={{ marginBottom: 14, padding: '12px 16px' }}>
+      <div className="card filter-bar">
         <form
           className="row"
           onSubmit={(e) => e.preventDefault()}
@@ -304,7 +316,7 @@ export default function RetentionPoliciesPage({ notify }) {
                         <button className="sm" onClick={() => openEditModal(p)}>
                           <Icon name="edit" size={13} /> Edit
                         </button>
-                        <button className="danger sm" onClick={() => handleDeletePolicy(p)}>
+                        <button className="danger sm" aria-label={`Delete policy ${p.name}`} onClick={() => handleDeletePolicy(p)}>
                           <Icon name="trash" size={13} />
                         </button>
                       </div>
@@ -319,9 +331,12 @@ export default function RetentionPoliciesPage({ notify }) {
 
       {modalOpen && (
         <div className="modal-backdrop" onClick={() => setModalOpen(false)}>
-          <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={handleSavePolicy}>
+          <form className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} onSubmit={handleSavePolicy}>
             <div className="modal-head">
               <h2>{editingPolicy ? `Edit Policy: ${editingPolicy.name}` : 'Create Retention Policy'}</h2>
+              <button type="button" className="ghost icon-btn sm" aria-label="Close modal" onClick={() => setModalOpen(false)}>
+                <Icon name="close" size={15} />
+              </button>
             </div>
 
             <label className="field">
@@ -350,7 +365,7 @@ export default function RetentionPoliciesPage({ notify }) {
               </span>
             </label>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <div className="form-grid-2">
               <label className="field">
                 Keep Last N Tags (Optional)
                 <input
@@ -429,6 +444,8 @@ export default function RetentionPoliciesPage({ notify }) {
         <div className="modal-backdrop" onClick={() => setExecutionReport(null)}>
           <div
             className="modal"
+            role="dialog"
+            aria-modal="true"
             style={{ maxWidth: 780, width: '95%' }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -436,6 +453,9 @@ export default function RetentionPoliciesPage({ notify }) {
               <h2>
                 {executionReport.dryRun ? 'Dry-Run Preview' : 'Execution Report'}: {executionReport.policyName}
               </h2>
+              <button type="button" className="ghost icon-btn sm" aria-label="Close modal" onClick={() => setExecutionReport(null)}>
+                <Icon name="close" size={15} />
+              </button>
             </div>
 
             <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>

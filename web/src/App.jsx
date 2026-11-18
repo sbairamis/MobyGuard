@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { api, DASHBOARD_VERSION, loadSession, saveSession } from './api'
+import { api, loadSession, saveSession } from './api'
 import Icon from './components/Icon'
 import AuthPage from './pages/AuthPage'
 import RegistryPage from './pages/RegistryPage'
@@ -13,9 +13,10 @@ import ProfilePage from './pages/ProfilePage'
 export default function App() {
   const [ready, setReady] = useState(false)
   const [setupRequired, setSetupRequired] = useState(false)
-  const [apiVersion, setApiVersion] = useState('v1.0.8')
+  const [version, setVersion] = useState('')
   const [user, setUser] = useState(() => loadSession())
   const [route, setRoute] = useState(() => window.location.hash.slice(1) || '/')
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [theme, setTheme] = useState(() => localStorage.getItem('mobyguard_theme') || 'dark')
   const [toasts, setToasts] = useState([])
 
@@ -41,7 +42,7 @@ export default function App() {
       document.head.appendChild(iconLink)
     }
     if (!iconLink.href.includes('favicon.png')) {
-      iconLink.href = '/favicon.png?v=1.0.8'
+      iconLink.href = '/favicon.png'
     }
 
     if (!user || setupRequired) {
@@ -62,7 +63,10 @@ export default function App() {
   }, [user, setupRequired, route])
 
   useEffect(() => {
-    const onHash = () => setRoute(window.location.hash.slice(1) || '/')
+    const onHash = () => {
+      setRoute(window.location.hash.slice(1) || '/')
+      setSidebarOpen(false)
+    }
     const onUnauth = () => setUser(null)
     window.addEventListener('hashchange', onHash)
     window.addEventListener('mobyguard:unauthorized', onUnauth)
@@ -77,7 +81,7 @@ export default function App() {
       try {
         const status = await api.get('/api/v1/User/setup-status')
         if (status?.apiVersion) {
-          setApiVersion(status.apiVersion)
+          setVersion(status.apiVersion)
         }
         if (status?.setupRequired) {
           setSetupRequired(true)
@@ -173,7 +177,12 @@ export default function App() {
 
   return (
     <div className="shell">
-      <aside>
+      <div
+        className={`sidebar-backdrop ${sidebarOpen ? 'open' : ''}`}
+        onClick={() => setSidebarOpen(false)}
+      />
+
+      <aside className={sidebarOpen ? 'open' : ''}>
         <div className="brand">
           <div className="brand-logo">
             <img src="/logo.png" alt="MobyGuard" />
@@ -184,7 +193,7 @@ export default function App() {
           </div>
         </div>
 
-        <nav>
+        <nav aria-label="Main navigation">
           {navItems.map((item, idx) =>
             item.section ? (
               <div key={idx} className="nav-section">{item.section}</div>
@@ -193,6 +202,7 @@ export default function App() {
                 key={item.path}
                 href={`#${item.path}`}
                 className={route === item.path ? 'active' : ''}
+                onClick={() => setSidebarOpen(false)}
               >
                 <Icon name={item.icon} size={17} />
                 <span>{item.label}</span>
@@ -200,17 +210,6 @@ export default function App() {
             )
           )}
         </nav>
-
-        <div style={{ padding: '10px 14px', borderTop: '1px solid var(--border)', fontSize: 11.5 }} className="muted">
-          <div className="row" style={{ justifyContent: 'space-between' }}>
-            <span>API Version</span>
-            <span className="mono">{apiVersion}</span>
-          </div>
-          <div className="row" style={{ justifyContent: 'space-between', marginTop: 3 }}>
-            <span>Dashboard</span>
-            <span className="mono">{DASHBOARD_VERSION}</span>
-          </div>
-        </div>
 
         <div className="sidebar-footer">
           <div className="avatar">{initials}</div>
@@ -220,6 +219,7 @@ export default function App() {
           </div>
           <button
             className="ghost icon-btn sm"
+            aria-label={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
             title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
           >
@@ -227,6 +227,7 @@ export default function App() {
           </button>
           <button
             className="ghost icon-btn sm"
+            aria-label="Sign Out"
             title="Sign Out"
             onClick={handleLogout}
           >
@@ -236,7 +237,29 @@ export default function App() {
       </aside>
 
       <main>
+        <div className="mobile-topbar">
+          <div className="brand" style={{ padding: 0 }}>
+            <div className="brand-logo" style={{ width: 28, height: 28 }}>
+              <img src="/logo.png" alt="MobyGuard" />
+            </div>
+            <b>MobyGuard</b>
+          </div>
+          <button
+            type="button"
+            className="ghost icon-btn sm"
+            aria-label="Toggle navigation"
+            aria-expanded={sidebarOpen}
+            onClick={() => setSidebarOpen((prev) => !prev)}
+          >
+            <Icon name={sidebarOpen ? 'close' : 'menu'} size={17} />
+          </button>
+        </div>
+
         <PageComponent user={user} notify={notify} />
+        <footer className="app-footer">
+          <span>MobyGuard — Registry v3 Control Plane</span>
+          {version && <span className="mono">{version}</span>}
+        </footer>
       </main>
 
       <ToastStack toasts={toasts} />
@@ -247,7 +270,7 @@ export default function App() {
 function ToastStack({ toasts }) {
   if (!toasts.length) return null
   return (
-    <div className="toast-stack">
+    <div className="toast-stack" role="status" aria-live="polite">
       {toasts.map((t) => (
         <div key={t.id} className={`toast ${t.type}`}>
           <span>{t.message}</span>

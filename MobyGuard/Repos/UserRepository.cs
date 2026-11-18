@@ -59,13 +59,39 @@ public partial class UserRepository(
             return Result<SetupStatusDto>.Success(new SetupStatusDto
             {
                 SetupRequired = !hasUsers,
-                ApiVersion = "v1.0.8"
+                ApiVersion = Variables.AppVersion
             });
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "An unexpected error occurred while checking setup status");
             return Result<SetupStatusDto>.Failure(RepositoryStatus.InternalServerError, ResponseMessages.InternalServerError);
+        }
+    }
+
+    public async Task<Result> VerifySetupToken(VerifySetupTokenDto dto)
+    {
+        try
+        {
+            if (await context.Users.AnyAsync())
+            {
+                setupTokenService.InvalidateToken();
+                return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.SetupAlreadyCompleted);
+            }
+
+            setupTokenService.EnsureTokenGenerated();
+
+            if (!setupTokenService.VerifyToken(dto.SetupToken))
+            {
+                return Result.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidSetupToken);
+            }
+
+            return Result.Success();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "An unexpected error occurred while verifying the setup token");
+            return Result.Failure(RepositoryStatus.InternalServerError, ResponseMessages.InternalServerError);
         }
     }
 

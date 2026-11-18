@@ -16,6 +16,7 @@ RUN npm run build
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 SHELL ["/bin/bash", "-c"]
 ARG TARGETARCH
+ARG APP_VERSION=""
 
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     DOTNET_NOLOGO=1
@@ -34,6 +35,7 @@ RUN dotnet publish ./MobyGuard/MobyGuard.csproj \
       --use-current-runtime \
       --self-contained false \
       --no-restore \
+      ${APP_VERSION:+-p:Version=${APP_VERSION#v}} \
       -o /app/out \
     && cp ./MobyGuard/appsettings.example.json /app/out/appsettings.json
 

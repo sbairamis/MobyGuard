@@ -21,6 +21,19 @@ public class UserController(UserRepository repository) : CustomBaseController
         return HandleResult(result);
     }
 
+    [HttpPost("verify-setup-token")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult> VerifySetupToken(VerifySetupTokenDto verifySetupTokenDto)
+    {
+        var result = await repository.VerifySetupToken(verifySetupTokenDto);
+
+        return HandleResult(result);
+    }
+
     [HttpPost("setup")]
     [AllowAnonymous]
     [ProducesResponseType(typeof(LoginResponseDto), StatusCodes.Status200OK)]

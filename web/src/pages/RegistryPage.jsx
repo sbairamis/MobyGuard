@@ -112,9 +112,13 @@ export default function RegistryPage({ user, notify }) {
     }
   }
 
-  function copyText(text, label) {
-    navigator.clipboard.writeText(text)
-    notify(`${label} copied`, 'ok')
+  async function copyText(text, label) {
+    try {
+      await navigator.clipboard.writeText(text)
+      notify(`${label} copied`, 'ok')
+    } catch {
+      notify(`Could not copy ${label.toLowerCase()}`, 'err')
+    }
   }
 
   useEffect(() => {
@@ -139,7 +143,7 @@ export default function RegistryPage({ user, notify }) {
       </div>
 
       {repoError && (
-        <div className="card" style={{ borderColor: 'color-mix(in srgb, var(--warn) 40%, transparent)', marginBottom: 16 }}>
+        <div className="card alert-card warn" role="alert">
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <div>
               <b style={{ color: 'var(--warn)' }}>Upstream Docker Registry Notice</b>
@@ -151,7 +155,7 @@ export default function RegistryPage({ user, notify }) {
       )}
 
       {gcStatus?.pendingDeletedManifestsCount > 0 && (
-        <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card alert-card">
           <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
             <div>
               <b>Storage Garbage Collection Pending ({gcStatus.pendingDeletedManifestsCount} deleted manifest{gcStatus.pendingDeletedManifestsCount === 1 ? '' : 's'})</b>
@@ -179,12 +183,13 @@ export default function RegistryPage({ user, notify }) {
       <div className="registry-grid">
         {/* Column 1: Repositories */}
         <div className="card tight">
-          <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
+          <div className="panel-head">
             <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
               <h3 style={{ margin: 0 }}>Repositories ({filteredRepos.length})</h3>
             </div>
             <input
               type="text"
+              aria-label="Filter repositories"
               placeholder="Filter repositories…"
               value={repoSearch}
               onChange={(e) => setRepoSearch(e.target.value)}
@@ -192,7 +197,7 @@ export default function RegistryPage({ user, notify }) {
             />
           </div>
 
-          <div style={{ maxHeight: 580, overflowY: 'auto' }}>
+          <div className="scroll-list">
             {loadingRepos ? (
               <div className="empty"><span className="spin" /> Loading repositories…</div>
             ) : filteredRepos.length === 0 ? (
@@ -201,8 +206,16 @@ export default function RegistryPage({ user, notify }) {
               filteredRepos.map((repo) => (
                 <div
                   key={repo.name}
+                  role="button"
+                  tabIndex={0}
                   className={`list-item ${selectedRepo?.name === repo.name ? 'active' : ''}`}
                   onClick={() => selectRepository(repo)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      selectRepository(repo)
+                    }
+                  }}
                 >
                   <div style={{ minWidth: 0 }}>
                     <div className="row" style={{ gap: 6 }}>
@@ -223,7 +236,7 @@ export default function RegistryPage({ user, notify }) {
 
         {/* Column 2: Tags */}
         <div className="card tight">
-          <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)' }}>
+          <div className="panel-head">
             <h3 style={{ margin: 0 }}>
               Tags {selectedRepo ? `(${tagsData?.tags?.length || 0})` : ''}
             </h3>
@@ -232,7 +245,7 @@ export default function RegistryPage({ user, notify }) {
             </div>
           </div>
 
-          <div style={{ maxHeight: 580, overflowY: 'auto' }}>
+          <div className="scroll-list">
             {!selectedRepo ? (
               <div className="empty">Select a repository to view its tags.</div>
             ) : loadingTags ? (
@@ -243,8 +256,16 @@ export default function RegistryPage({ user, notify }) {
               tagsData.tags.map((tag) => (
                 <div
                   key={tag}
+                  role="button"
+                  tabIndex={0}
                   className={`list-item ${selectedRef === tag ? 'active' : ''}`}
                   onClick={() => selectTagOrDigest(selectedRepo.name, tag)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault()
+                      selectTagOrDigest(selectedRepo.name, tag)
+                    }
+                  }}
                 >
                   <div className="row" style={{ gap: 6, minWidth: 0 }}>
                     <Icon name="tag" size={14} />
@@ -253,6 +274,7 @@ export default function RegistryPage({ user, notify }) {
                   <div className="row" style={{ gap: 4 }} onClick={(e) => e.stopPropagation()}>
                     <button
                       className="ghost icon-btn sm"
+                      aria-label={`Copy docker pull command for ${tag}`}
                       title={`Copy docker pull ${host}/${selectedRepo.name}:${tag}`}
                       onClick={() => copyText(`docker pull ${host}/${selectedRepo.name}:${tag}`, 'Pull command')}
                     >
@@ -261,6 +283,7 @@ export default function RegistryPage({ user, notify }) {
                     {tagsData.canDelete && (
                       <button
                         className="ghost danger icon-btn sm"
+                        aria-label={`Delete tag ${tag}`}
                         title="Delete tag manifest"
                         onClick={() => handleDeleteManifest(tag)}
                       >
@@ -315,7 +338,7 @@ export default function RegistryPage({ user, notify }) {
               </div>
 
               {/* Pull Command Box */}
-              <div className="row" style={{ justifyContent: 'space-between', background: 'var(--bg2)', padding: '9px 12px', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)' }}>
+              <div className="code-bar">
                 <code style={{ border: 0, background: 'none' }}>
                   docker pull {host}/{manifest.repository}:{manifest.reference}
                 </code>
@@ -325,18 +348,18 @@ export default function RegistryPage({ user, notify }) {
               </div>
 
               {/* Metadata Grid */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
-                <div style={{ background: 'var(--bg2)', padding: '10px 12px', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)' }}>
-                  <div className="dim" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 650 }}>Media Type</div>
+              <div className="meta-grid">
+                <div className="meta-card">
+                  <div className="meta-label">Media Type</div>
                   <div className="mono" style={{ fontSize: 12, marginTop: 3, wordBreak: 'break-all' }}>{manifest.mediaType}</div>
                 </div>
-                <div style={{ background: 'var(--bg2)', padding: '10px 12px', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)' }}>
-                  <div className="dim" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 650 }}>Created</div>
+                <div className="meta-card">
+                  <div className="meta-label">Created</div>
                   <div style={{ fontSize: 13, marginTop: 3 }}>{manifest.createdAt ? formatDate(manifest.createdAt) : 'Multi-arch / N/A'}</div>
                 </div>
                 {manifest.layers?.length > 0 && (
-                  <div style={{ background: 'var(--bg2)', padding: '10px 12px', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)' }}>
-                    <div className="dim" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 650 }}>Layers</div>
+                  <div className="meta-card">
+                    <div className="meta-label">Layers</div>
                     <div style={{ fontSize: 13, marginTop: 3 }}>{manifest.layers.length} filesystem blobs ({formatBytes(manifest.totalSizeBytes)})</div>
                   </div>
                 )}

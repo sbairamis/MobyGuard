@@ -279,6 +279,19 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         var activeSetupToken = setupTokenService.CurrentToken;
         Assert.False(string.IsNullOrWhiteSpace(activeSetupToken));
 
+        // Step 1: Verify one-time setup token endpoint rejects wrong token and accepts valid token
+        var verifyWrongRes = await client.PostAsJsonAsync(
+            "/api/v1/User/verify-setup-token",
+            new VerifySetupTokenDto { SetupToken = "wrong-token" },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, verifyWrongRes.StatusCode);
+
+        var verifyValidRes = await client.PostAsJsonAsync(
+            "/api/v1/User/verify-setup-token",
+            new VerifySetupTokenDto { SetupToken = activeSetupToken! },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, verifyValidRes.StatusCode);
+
         // Attempt setup without or with wrong setup token -> 401 Unauthorized
         var invalidTokenResponse = await client.PostAsJsonAsync(
             "/api/v1/User/setup",

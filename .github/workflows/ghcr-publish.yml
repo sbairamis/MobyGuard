@@ -159,6 +159,8 @@ jobs:
           file: ./MobyGuard/Dockerfile
           push: ${{ steps.meta.outputs.is_release == 'true' }}
           platforms: ${{ steps.meta.outputs.is_release == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          build-args: |
+            APP_VERSION=${{ steps.meta.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
