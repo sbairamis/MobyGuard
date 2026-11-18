@@ -95,6 +95,33 @@ public sealed class SessionCacheService(IMemoryCache cache)
         }
     }
 
+    public void IncreaseUnknownUserLoginRetries(string? username, IPAddress? clientAddress)
+    {
+        var key = BuildUnknownUserLoginAttemptsKey(username, clientAddress);
+
+        lock (_retryLock)
+        {
+            var currentCount = cache.TryGetValue(key, out int existing) ? existing : 0;
+
+            var options = new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = RetryWindow
+            };
+
+            cache.Set(key, currentCount + 1, options);
+        }
+    }
+
+    public bool IsLockedUnknownUser(string? username, IPAddress? clientAddress)
+    {
+        var key = BuildUnknownUserLoginAttemptsKey(username, clientAddress);
+
+        lock (_retryLock)
+        {
+            return cache.TryGetValue(key, out int attempts) && attempts >= Variables.LoginMaxRetries;
+        }
+    }
+
     public void ClearAllUserLoginRetries(int userId)
     {
         lock (_retryLock)
@@ -180,6 +207,12 @@ public sealed class SessionCacheService(IMemoryCache cache)
     private static string BuildLoginAttemptsKey(int userId, IPAddress? clientAddress)
     {
         return $"login-attempts:{userId}:{NormalizeIpAddress(clientAddress)}";
+    }
+
+    private static string BuildUnknownUserLoginAttemptsKey(string? username, IPAddress? clientAddress)
+    {
+        var normalizedName = (username ?? string.Empty).Trim().ToLowerInvariant();
+        return $"login-attempts:unknown:{normalizedName}:{NormalizeIpAddress(clientAddress)}";
     }
 
     private static string NormalizeIpAddress(IPAddress? ipAddress)

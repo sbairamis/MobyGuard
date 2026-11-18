@@ -36,6 +36,14 @@ public class TokenRepository(
 
             if (user is null)
             {
+                if (sessionService.IsLockedUnknownUser(username, clientAddress))
+                {
+                    return Result<RegistryTokenResponseDto>.Failure(RepositoryStatus.TooManyRequests, ResponseMessages.TooManyRequests);
+                }
+
+                PasswordHasher.VerifyDummy(password);
+                sessionService.IncreaseUnknownUserLoginRetries(username, clientAddress);
+
                 return Result<RegistryTokenResponseDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidCredentials);
             }
 
@@ -44,16 +52,16 @@ public class TokenRepository(
                 return Result<RegistryTokenResponseDto>.Failure(RepositoryStatus.TooManyRequests, ResponseMessages.TooManyRequests);
             }
 
-            if (!user.IsActive)
-            {
-                return Result<RegistryTokenResponseDto>.Failure(RepositoryStatus.Forbidden, ResponseMessages.UserIsInactive);
-            }
-
             if (!PasswordHasher.Verify(password, user.Salt, user.Password))
             {
                 sessionService.IncreaseUserLoginRetries(user.Id, clientAddress);
 
                 return Result<RegistryTokenResponseDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidCredentials);
+            }
+
+            if (!user.IsActive)
+            {
+                return Result<RegistryTokenResponseDto>.Failure(RepositoryStatus.Forbidden, ResponseMessages.UserIsInactive);
             }
 
             sessionService.ClearUserLoginRetries(user.Id, clientAddress);

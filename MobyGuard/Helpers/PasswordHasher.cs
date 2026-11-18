@@ -9,6 +9,9 @@ public static class PasswordHasher
     private const int HashSizeBytes = 32;
     private const int Iterations = 220_000;
 
+    private static readonly string DummySalt = GenerateSalt();
+    private static readonly string DummyHash = Hash("mobyguard-dummy-timing-password", DummySalt);
+
     public static string GenerateSalt()
     {
         return Convert.ToBase64String(RandomNumberGenerator.GetBytes(SaltSizeBytes));
@@ -44,5 +47,11 @@ public static class PasswordHasher
         var expectedBytes = Encoding.UTF8.GetBytes(expectedHash);
 
         return CryptographicOperations.FixedTimeEquals(actualBytes, expectedBytes);
+    }
+
+    public static void VerifyDummy(string? password)
+    {
+        var candidate = string.IsNullOrEmpty(password) ? "dummy" : password;
+        _ = Verify(candidate, DummySalt, DummyHash);
     }
 }

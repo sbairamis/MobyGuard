@@ -171,6 +171,14 @@ public partial class UserRepository(
 
             if (user is null)
             {
+                if (sessionService.IsLockedUnknownUser(loginBodyDto.Username, clientAddress))
+                {
+                    return Result<LoginResponseDto>.Failure(RepositoryStatus.TooManyRequests, ResponseMessages.TooManyRequests);
+                }
+
+                PasswordHasher.VerifyDummy(loginBodyDto.Password);
+                sessionService.IncreaseUnknownUserLoginRetries(loginBodyDto.Username, clientAddress);
+
                 return Result<LoginResponseDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidCredentials);
             }
 
@@ -181,6 +189,15 @@ public partial class UserRepository(
                 return Result<LoginResponseDto>.Failure(RepositoryStatus.TooManyRequests, ResponseMessages.TooManyRequests);
             }
 
+            var correctPassword = PasswordHasher.Verify(loginBodyDto.Password, user.Salt, user.Password);
+
+            if (!correctPassword)
+            {
+                sessionService.IncreaseUserLoginRetries(user.Id, clientAddress);
+
+                return Result<LoginResponseDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidCredentials);
+            }
+
             if (!user.IsActive)
             {
                 return Result<LoginResponseDto>.Failure(RepositoryStatus.Forbidden, ResponseMessages.UserIsInactive);
@@ -189,15 +206,6 @@ public partial class UserRepository(
             if (string.Equals(user.UserType?.Type, Roles.Service, StringComparison.OrdinalIgnoreCase))
             {
                 return Result<LoginResponseDto>.Failure(RepositoryStatus.Forbidden, ResponseMessages.ServiceAccountCannotLogin);
-            }
-
-            var correctPassword = PasswordHasher.Verify(loginBodyDto.Password, user.Salt, user.Password);
-
-            if (!correctPassword)
-            {
-                sessionService.IncreaseUserLoginRetries(user.Id, clientAddress);
-
-                return Result<LoginResponseDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidCredentials);
             }
 
             sessionService.ClearUserLoginRetries(user.Id, clientAddress);

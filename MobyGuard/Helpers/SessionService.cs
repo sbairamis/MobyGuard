@@ -99,6 +99,16 @@ public class SessionService(DatabaseContext context, SessionCacheService cacheSe
         return cacheService.IsLockedUser(userId, clientAddress);
     }
 
+    public void IncreaseUnknownUserLoginRetries(string? username, IPAddress? clientAddress)
+    {
+        cacheService.IncreaseUnknownUserLoginRetries(username, clientAddress);
+    }
+
+    public bool IsLockedUnknownUser(string? username, IPAddress? clientAddress)
+    {
+        return cacheService.IsLockedUnknownUser(username, clientAddress);
+    }
+
     public void ClearAllUserLoginRetries(int userId)
     {
         cacheService.ClearAllUserLoginRetries(userId);
