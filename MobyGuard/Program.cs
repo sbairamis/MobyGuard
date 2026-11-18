@@ -1,13 +1,10 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using System.Text;
 using Asp.Versioning;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
 using MobyGuard.Auth;
 using MobyGuard.Configuration;
 using MobyGuard.Database.Context;
@@ -25,7 +22,6 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
                        ?? throw new InvalidOperationException("Connection string 'DefaultConnection' could not be found.");
 
-builder.Services.AddValidatedOptions<JwtOptions>();
 builder.Services.AddValidatedOptions<RegistryTokenOptions>();
 builder.Services.AddValidatedOptions<HostingOptions>();
 
@@ -90,34 +86,37 @@ builder.Services.AddSingleton<SessionCacheService>();
 builder.Services.AddSingleton<SetupTokenService>();
 builder.Services.AddScoped<SessionService>();
 
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme).AddJwtBearer();
-
-builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationScheme)
-    .Configure<IOptions<JwtOptions>>((options, jwtOptions) =>
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(options =>
     {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtOptions.Value.Issuer,
-            ValidAudience = jwtOptions.Value.Audience,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(jwtOptions.Value.SecurityKey)),
-            ClockSkew = TimeSpan.Zero
-        };
+        options.Cookie.Name = "mobyguard_session";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Strict;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+        options.Cookie.Path = "/";
+        options.ExpireTimeSpan = TimeSpan.FromDays(Variables.SessionExpiryDays);
+        options.SlidingExpiration = true;
 
-        options.Events = new JwtBearerEvents
+        options.Events = new CookieAuthenticationEvents
         {
-            OnTokenValidated = context =>
+            OnRedirectToLogin = context =>
             {
-                var subClaim = context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                               ?? context.Principal?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
-                var jtiClaim = context.Principal?.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return Task.CompletedTask;
+            },
+            OnRedirectToAccessDenied = context =>
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return Task.CompletedTask;
+            },
+            OnValidatePrincipal = context =>
+            {
+                var subClaim = context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var jtiClaim = context.Principal?.FindFirst("jti")?.Value;
 
                 if (!int.TryParse(subClaim, out var userId) || string.IsNullOrWhiteSpace(jtiClaim))
                 {
-                    context.Fail("Invalid token claims.");
+                    context.RejectPrincipal();
                     return Task.CompletedTask;
                 }
 
@@ -125,7 +124,7 @@ builder.Services.AddOptions<JwtBearerOptions>(JwtBearerDefaults.AuthenticationSc
 
                 if (!sessionCache.IsAccessTokenActive(userId, jtiClaim))
                 {
-                    context.Fail("Token has been revoked.");
+                    context.RejectPrincipal();
                 }
 
                 return Task.CompletedTask;

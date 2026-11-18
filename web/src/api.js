@@ -3,10 +3,9 @@ export const DASHBOARD_VERSION = 'v1.0.8'
 
 const ERROR_MESSAGES = {
   _invalidCredentials: 'Invalid username or password.',
-  _invalidRefreshToken: 'Your session has expired. Please sign in again.',
   _userIsInactive: 'This account has been deactivated.',
   _serviceAccountCannotLogin: 'Service accounts can only authenticate via Docker CLI (/api/v1/Token), not the web UI.',
-  _tooManyRequests: 'Too many failed login attempts. Please wait 15 minutes.',
+  _tooManyRequests: 'Too many failed login attempts. Please wait 30 minutes.',
   _userNotFound: 'User not found.',
   _userAlreadyExists: 'A user with that username already exists.',
   _invalidUsername: 'Username must be 2–64 characters, start with a letter or number, and contain only letters, numbers, dots (.), underscores (_), or hyphens (-).',
@@ -56,40 +55,16 @@ export function saveSession(session) {
   if (!session) {
     localStorage.removeItem(STORAGE_KEY)
   } else {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(session))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      id: session.id,
+      username: session.username,
+      userType: session.userType
+    }))
   }
 }
 
-let refreshPromise = null
-
-async function doRefreshToken() {
-  const session = loadSession()
-  if (!session?.refreshToken) {
-    throw new Error('No refresh token available.')
-  }
-
-  const res = await fetch('/api/v1/User/refresh', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ refreshToken: session.refreshToken })
-  })
-
-  if (!res.ok) {
-    throw new Error('Refresh token invalid or expired.')
-  }
-
-  const refreshed = await res.json()
-  const updatedSession = { ...session, ...refreshed }
-  saveSession(updatedSession)
-  return updatedSession
-}
-
-async function request(method, path, body, isRetry = false) {
-  const session = loadSession()
+async function request(method, path, body) {
   const headers = {}
-  if (session?.token) {
-    headers['Authorization'] = `Bearer ${session.token}`
-  }
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json'
   }
@@ -97,6 +72,7 @@ async function request(method, path, body, isRetry = false) {
   const res = await fetch(path, {
     method,
     headers,
+    credentials: 'same-origin',
     body: body !== undefined ? JSON.stringify(body) : undefined
   })
 
@@ -109,26 +85,10 @@ async function request(method, path, body, isRetry = false) {
   const data = isJson ? await res.json().catch(() => null) : await res.text().catch(() => '')
 
   if (!res.ok) {
-    const isAuthEndpoint = path.includes('/login') || path.includes('/setup') || path.includes('/refresh')
-    if (res.status === 401 && !isRetry && !isAuthEndpoint) {
-      const currentSession = loadSession()
-      if (currentSession?.refreshToken) {
-        try {
-          if (!refreshPromise) {
-            refreshPromise = doRefreshToken().finally(() => {
-              refreshPromise = null
-            })
-          }
-          await refreshPromise
-          return await request(method, path, body, true)
-        } catch {
-          saveSession(null)
-          window.dispatchEvent(new CustomEvent('mobyguard:unauthorized'))
-        }
-      } else {
-        saveSession(null)
-        window.dispatchEvent(new CustomEvent('mobyguard:unauthorized'))
-      }
+    const isAuthEndpoint = path.includes('/login') || path.includes('/setup')
+    if (res.status === 401 && !isAuthEndpoint) {
+      saveSession(null)
+      window.dispatchEvent(new CustomEvent('mobyguard:unauthorized'))
     }
     const detail = data?.detail || data?.title || (typeof data === 'string' && data) || `HTTP ${res.status}`
     throw new Error(formatErrorMessage(detail))

@@ -1,10 +1,9 @@
-using System.IdentityModel.Tokens.Jwt;
-using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using System.Text;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -13,13 +12,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
 using MobyGuard.Auth;
-using MobyGuard.Configuration;
 using MobyGuard.Database.Context;
 using MobyGuard.Database.Dtos.UserDtos;
 using MobyGuard.Database.Models;
 using MobyGuard.Enumerators;
+using MobyGuard.Global;
 using MobyGuard.Helpers;
 using MobyGuard.Seeders;
 
@@ -73,14 +71,13 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         var dbContext = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
 
         await dbContext.Database.ExecuteSqlRawAsync("""
-            DELETE FROM "RefreshTokens";
             DELETE FROM "AuditLogs";
             DELETE FROM "RepositoryPermissions";
             DELETE FROM "RetentionPolicies";
             DELETE FROM "WebhookSubscriptions";
             DELETE FROM "Users";
             DELETE FROM "UserTypes";
-            UPDATE "sqlite_sequence" SET "seq" = 0 WHERE "name" IN ('RefreshTokens', 'AuditLogs', 'RepositoryPermissions', 'RetentionPolicies', 'WebhookSubscriptions', 'Users', 'UserTypes');
+            UPDATE "sqlite_sequence" SET "seq" = 0 WHERE "name" IN ('AuditLogs', 'RepositoryPermissions', 'RetentionPolicies', 'WebhookSubscriptions', 'Users', 'UserTypes');
             """);
 
         DbInitializer.Initialize(dbContext);
@@ -121,25 +118,31 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         if (userType == PrimaryKeys.UserTypes.Service)
         {
             using var scope = Services.CreateScope();
-            var jwtOptions = scope.ServiceProvider.GetRequiredService<IOptions<JwtOptions>>().Value;
             var sessionCache = scope.ServiceProvider.GetRequiredService<SessionCacheService>();
-            var jti = Guid.NewGuid().ToString("N");
-            var key = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(jwtOptions.SecurityKey));
-            var token = new JwtSecurityToken(
-                issuer: jwtOptions.Issuer,
-                audience: jwtOptions.Audience,
-                claims: new[]
-                {
-                    new Claim(JwtRegisteredClaimNames.Sub, ((int)userType).ToString()),
-                    new Claim(JwtRegisteredClaimNames.UniqueName, username),
-                    new Claim("role", Roles.Service),
-                    new Claim(JwtRegisteredClaimNames.Jti, jti)
-                },
-                expires: DateTime.UtcNow.AddMinutes(15),
-                signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
+            var cookieOptions = scope.ServiceProvider
+                .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+                .Get(CookieAuthenticationDefaults.AuthenticationScheme);
 
-            sessionCache.StoreActiveAccessToken((int)userType, jti, TimeSpan.FromMinutes(15));
-            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", new JwtSecurityTokenHandler().WriteToken(token));
+            var jti = Guid.NewGuid().ToString("N");
+            var claims = new[]
+            {
+                new Claim(ClaimTypes.NameIdentifier, ((int)userType).ToString()),
+                new Claim(ClaimTypes.Name, username),
+                new Claim(ClaimTypes.Role, Roles.Service),
+                new Claim("jti", jti)
+            };
+            var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+            var principal = new ClaimsPrincipal(identity);
+            var props = new AuthenticationProperties
+            {
+                IsPersistent = true,
+                ExpiresUtc = DateTimeOffset.UtcNow.AddDays(Variables.SessionExpiryDays)
+            };
+            var ticket = new AuthenticationTicket(principal, props, CookieAuthenticationDefaults.AuthenticationScheme);
+            var cookieValue = cookieOptions.TicketDataFormat.Protect(ticket);
+
+            sessionCache.StoreActiveAccessToken((int)userType, jti, TimeSpan.FromDays(Variables.SessionExpiryDays));
+            client.DefaultRequestHeaders.Add("Cookie", $"{cookieOptions.Cookie.Name}={cookieValue}");
             return client;
         }
 
@@ -149,10 +152,6 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
             TestContext.Current.CancellationToken);
 
         response.EnsureSuccessStatusCode();
-
-        var login = await response.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
-
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", login!.Token);
 
         return client;
     }

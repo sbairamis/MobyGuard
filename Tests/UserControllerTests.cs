@@ -1,9 +1,10 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using MobyGuard.Auth;
 using MobyGuard.Classes;
 using MobyGuard.Database.Context;
@@ -27,6 +28,17 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
+    private async Task<(HttpClient Client, HttpResponseMessage Response)> LoginClientFromAsync(string clientAddress, string username, string password)
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Forwarded-For", clientAddress);
+        var response = await client.PostAsJsonAsync(
+            "/api/v1/User/login",
+            new LoginUserDto { Username = username, Password = password },
+            TestContext.Current.CancellationToken);
+        return (client, response);
+    }
+
     private Task<HttpResponseMessage> LoginFromAsync(string clientAddress, string username, string password)
     {
         var client = _factory.CreateClient();
@@ -35,6 +47,17 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
             "/api/v1/User/login",
             new LoginUserDto { Username = username, Password = password },
             TestContext.Current.CancellationToken);
+    }
+
+    private HttpClient CreateClientWithSessionCookie(HttpResponseMessage loginResponse)
+    {
+        Assert.True(loginResponse.Headers.TryGetValues("Set-Cookie", out var setCookies));
+        var sessionSetCookie = setCookies.First(c => c.StartsWith("mobyguard_session=", StringComparison.OrdinalIgnoreCase));
+        var cookiePair = sessionSetCookie.Split(';', 2)[0];
+
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("Cookie", cookiePair);
+        return client;
     }
 
     [Fact]
@@ -48,58 +71,25 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         Assert.NotNull(body);
         Assert.Equal("Admin", body.Username);
         Assert.Equal("Admin", body.UserType);
-        Assert.False(string.IsNullOrEmpty(body.Token));
-        Assert.False(string.IsNullOrEmpty(body.RefreshToken));
 
-        // Verify active access token JTI is tracked in IMemoryCache and hashed refresh token is persisted in SQLite
+        Assert.True(response.Headers.TryGetValues("Set-Cookie", out var setCookies));
+        var sessionCookieHeader = setCookies.Single(c => c.StartsWith("mobyguard_session=", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("httponly", sessionCookieHeader, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("samesite=strict", sessionCookieHeader, StringComparison.OrdinalIgnoreCase);
+
+        var rawCookieValue = Uri.UnescapeDataString(sessionCookieHeader.Split(';', 2)[0]["mobyguard_session=".Length..]);
+
         using var scope = _factory.Services.CreateScope();
         var sessionCache = scope.ServiceProvider.GetRequiredService<SessionCacheService>();
-        var dbContext = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
+        var cookieOptions = scope.ServiceProvider
+            .GetRequiredService<IOptionsMonitor<CookieAuthenticationOptions>>()
+            .Get(CookieAuthenticationDefaults.AuthenticationScheme);
 
-        var jwt = new JwtSecurityTokenHandler().ReadJwtToken(body.Token);
-        var jti = jwt.Claims.First(c => c.Type == JwtRegisteredClaimNames.Jti).Value;
-        Assert.True(sessionCache.IsAccessTokenActive(body.Id, jti));
-
-        var secret = body.RefreshToken.Split('.', 2)[1];
-        var expectedHash = SessionService.HashSecret(secret);
-        var persisted = await dbContext.RefreshTokens.SingleOrDefaultAsync(
-            t => t.UserId == body.Id && t.TokenHash == expectedHash,
-            TestContext.Current.CancellationToken);
-
-        Assert.NotNull(persisted);
-        Assert.NotEqual(body.RefreshToken, persisted.TokenHash);
-        Assert.True(persisted.ExpiresAt > DateTime.UtcNow);
-    }
-
-    [Fact]
-    public async Task RefreshToken_WithValidToken_ReturnsNewTokensAndInvalidatesOldToken()
-    {
-        var loginResponse = await LoginFromAsync("203.0.113.10", "User", "user");
-        var loginBody = await loginResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.NotNull(loginBody);
-        var originalRefreshToken = loginBody.RefreshToken;
-        Assert.False(string.IsNullOrEmpty(originalRefreshToken));
-
-        var client = _factory.CreateClient();
-        var refreshResponse = await client.PostAsJsonAsync(
-            "/api/v1/User/refresh",
-            new RefreshTokenDto { RefreshToken = originalRefreshToken },
-            TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.OK, refreshResponse.StatusCode);
-        var refreshBody = await refreshResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.NotNull(refreshBody);
-        Assert.False(string.IsNullOrEmpty(refreshBody.Token));
-        Assert.False(string.IsNullOrEmpty(refreshBody.RefreshToken));
-        Assert.NotEqual(originalRefreshToken, refreshBody.RefreshToken);
-
-        // Attempting to reuse the consumed refresh token should fail with 401
-        var reuseResponse = await client.PostAsJsonAsync(
-            "/api/v1/User/refresh",
-            new RefreshTokenDto { RefreshToken = originalRefreshToken },
-            TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.Unauthorized, reuseResponse.StatusCode);
+        var ticket = cookieOptions.TicketDataFormat.Unprotect(rawCookieValue);
+        Assert.NotNull(ticket);
+        var jti = ticket.Principal.FindFirst("jti")?.Value;
+        Assert.False(string.IsNullOrEmpty(jti));
+        Assert.True(sessionCache.IsAccessTokenActive(body.Id, jti!));
     }
 
     [Fact]
@@ -109,10 +99,9 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         var loginBody = await loginResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(loginBody);
 
-        var userClient = _factory.CreateClient();
-        userClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginBody.Token);
+        var userClient = CreateClientWithSessionCookie(loginResponse);
 
-        // Verify active token works
+        // Verify active session cookie works
         var meResponseBefore = await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, meResponseBefore.StatusCode);
 
@@ -131,16 +120,9 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, updateResponse.StatusCode);
 
-        // The user's 15-minute access token must immediately be rejected with 401
+        // The user's active session cookie must immediately be rejected with 401
         var meResponseAfter = await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, meResponseAfter.StatusCode);
-
-        // Refresh token must also fail immediately
-        var refreshResponse = await _factory.CreateClient().PostAsJsonAsync(
-            "/api/v1/User/refresh",
-            new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
-            TestContext.Current.CancellationToken);
-        Assert.True(refreshResponse.StatusCode == HttpStatusCode.Unauthorized || refreshResponse.StatusCode == HttpStatusCode.Forbidden);
     }
 
     [Fact]
@@ -150,10 +132,9 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         var loginBody = await loginResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(loginBody);
 
-        var userClient = _factory.CreateClient();
-        userClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginBody.Token);
+        var userClient = CreateClientWithSessionCookie(loginResponse);
 
-        // Verify active token works
+        // Verify active session cookie works
         var meResponseBefore = await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, meResponseBefore.StatusCode);
 
@@ -164,16 +145,9 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, deleteResponse.StatusCode);
 
-        // The deleted user's access token must immediately fail
+        // The deleted user's session cookie must immediately fail
         var meResponseAfter = await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.Unauthorized, meResponseAfter.StatusCode);
-
-        // Refresh token must also fail
-        var refreshResponse = await _factory.CreateClient().PostAsJsonAsync(
-            "/api/v1/User/refresh",
-            new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
-            TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.Unauthorized, refreshResponse.StatusCode);
     }
 
     [Fact]
@@ -230,60 +204,17 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
     }
 
     [Fact]
-    public async Task RefreshToken_WithExpiredToken_ReturnsUnauthorized()
-    {
-        var loginResponse = await LoginFromAsync("203.0.113.10", "User", "user");
-        var loginBody = await loginResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.NotNull(loginBody);
-
-        var secret = loginBody.RefreshToken.Split('.', 2)[1];
-        var tokenHash = SessionService.HashSecret(secret);
-
-        using (var scope = _factory.Services.CreateScope())
-        {
-            var dbContext = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
-            var expiredAt = DateTime.UtcNow.AddMinutes(-5);
-            await dbContext.RefreshTokens
-                .Where(t => t.TokenHash == tokenHash)
-                .ExecuteUpdateAsync(
-                    setters => setters.SetProperty(t => t.ExpiresAt, expiredAt),
-                    TestContext.Current.CancellationToken);
-        }
-
-        var refreshResponse = await _factory.CreateClient().PostAsJsonAsync(
-            "/api/v1/User/refresh",
-            new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
-            TestContext.Current.CancellationToken);
-
-        Assert.Equal(HttpStatusCode.Unauthorized, refreshResponse.StatusCode);
-    }
-
-    [Fact]
-    public async Task RefreshToken_ConcurrentRequests_OnlyOneSucceeds()
-    {
-        var loginResponse = await LoginFromAsync("203.0.113.10", "User", "user");
-        var loginBody = await loginResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
-        Assert.NotNull(loginBody);
-
-        var tasks = Enumerable.Range(0, 6)
-            .Select(_ => _factory.CreateClient().PostAsJsonAsync(
-                "/api/v1/User/refresh",
-                new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
-                TestContext.Current.CancellationToken))
-            .ToArray();
-
-        var responses = await Task.WhenAll(tasks);
-
-        Assert.Single(responses, r => r.StatusCode == HttpStatusCode.OK);
-        Assert.Equal(5, responses.Count(r => r.StatusCode == HttpStatusCode.Unauthorized));
-    }
-
-    [Fact]
     public async Task SelfServicePasswordChange_ClearsLoginLockoutWithoutRevokingSession()
     {
-        var loginResponse = await LoginFromAsync("203.0.113.10", "User", "user");
+        // Browser 1 (the legitimate user changing their password)
+        var (userClient, loginResponse) = await LoginClientFromAsync("203.0.113.10", "User", "user");
         var loginBody = await loginResponse.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(loginBody);
+
+        // Browser 2 (another active session for the same user that should be revoked upon password change)
+        var (otherSessionClient, otherLoginResponse) = await LoginClientFromAsync("203.0.113.11", "User", "user");
+        Assert.Equal(HttpStatusCode.OK, otherLoginResponse.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await otherSessionClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken)).StatusCode);
 
         // Lock the account from another IP after login
         for (var i = 0; i < Variables.LoginMaxRetries; i++)
@@ -293,23 +224,17 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
 
         Assert.Equal(HttpStatusCode.TooManyRequests, (await LoginFromAsync("198.51.100.77", "User", "user")).StatusCode);
 
-        // Self-service password change calls ClearAllUserLoginRetries, NOT DeleteUserEntries
-        var userClient = _factory.CreateClient();
-        userClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", loginBody.Token);
-
+        // Self-service password change revokes all old sessions, clears lockouts, and reissues a fresh cookie to the caller
         var updateResponse = await userClient.PutAsJsonAsync(
             "/api/v1/User/me/password",
             new ChangePasswordDto { CurrentPassword = "user", Password = "Val1d#Password99" },
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, updateResponse.StatusCode);
 
-        // Existing access token, refresh token, and cleared lockout IP must all work
+        // Other existing session must immediately be revoked (401), while current reissued session and cleared lockout IP work
+        Assert.Equal(HttpStatusCode.Unauthorized, (await otherSessionClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await userClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken)).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await LoginFromAsync("198.51.100.77", "User", "Val1d#Password99")).StatusCode);
-        Assert.Equal(HttpStatusCode.OK, (await _factory.CreateClient().PostAsJsonAsync(
-            "/api/v1/User/refresh",
-            new RefreshTokenDto { RefreshToken = loginBody.RefreshToken },
-            TestContext.Current.CancellationToken)).StatusCode);
     }
 
     [Fact]
@@ -437,22 +362,15 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         var aliceSession = await aliceLogin.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(aliceSession);
 
-        var aliceClient = _factory.CreateClient();
-        aliceClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", aliceSession.Token);
+        var aliceClient = CreateClientWithSessionCookie(aliceLogin);
 
-        var logoutResponse = await aliceClient.PostAsJsonAsync(
+        var logoutResponse = await aliceClient.PostAsync(
             "/api/v1/User/logout",
-            new RefreshTokenDto { RefreshToken = aliceSession.RefreshToken },
+            content: null,
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, logoutResponse.StatusCode);
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await aliceClient.GetAsync("/api/v1/User/me", TestContext.Current.CancellationToken)).StatusCode);
-
-        var refreshAfterLogout = await _factory.CreateClient().PostAsJsonAsync(
-            "/api/v1/User/refresh",
-            new RefreshTokenDto { RefreshToken = aliceSession.RefreshToken },
-            TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.Unauthorized, refreshAfterLogout.StatusCode);
     }
 
     [Fact]
@@ -480,12 +398,9 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         var getByIdResponse = await adminClient.GetAsync($"/api/v1/User/{(int)PrimaryKeys.UserTypes.User}", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, getByIdResponse.StatusCode);
 
-        var userLogin = await LoginFromAsync("203.0.113.55", "User", "user");
+        var (userClient, userLogin) = await LoginClientFromAsync("203.0.113.55", "User", "user");
         var userSession = await userLogin.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(userSession);
-
-        var userClient = _factory.CreateClient();
-        userClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", userSession.Token);
 
         var wrongCurrentResponse = await userClient.PutAsJsonAsync(
             "/api/v1/User/me/password",
@@ -590,8 +505,7 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         var secondSession = await secondLoginRes.Content.ReadFromJsonAsync<LoginResponseDto>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(secondSession);
 
-        var secondAdminClient = _factory.CreateClient();
-        secondAdminClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", secondSession.Token);
+        var secondAdminClient = CreateClientWithSessionCookie(secondLoginRes);
 
         // 2. Secondary admin cannot delete the root admin (Id == 1)
         var deleteRootRes = await secondAdminClient.DeleteAsync("/api/v1/User/1", TestContext.Current.CancellationToken);

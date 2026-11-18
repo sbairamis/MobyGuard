@@ -7,7 +7,6 @@ namespace MobyGuard.Database.Context;
 public class DatabaseContext(DbContextOptions<DatabaseContext> options) : DbContext(options)
 {
     public DbSet<AuditLog> AuditLogs { get; set; }
-    public DbSet<RefreshToken> RefreshTokens { get; set; }
     public DbSet<RepositoryPermission> RepositoryPermissions { get; set; }
     public DbSet<RetentionPolicy> RetentionPolicies { get; set; }
     public DbSet<User> Users { get; set; }
@@ -33,16 +32,6 @@ public class DatabaseContext(DbContextOptions<DatabaseContext> options) : DbCont
         modelBuilder.Entity<RepositoryPermission>()
             .HasIndex(permission => new { permission.UserId, permission.RepositoryPattern })
             .IsUnique();
-
-        modelBuilder.Entity<RefreshToken>(entity =>
-        {
-            entity.HasIndex(token => token.TokenHash).IsUnique();
-            entity.HasIndex(token => token.ExpiresAt);
-            entity.HasOne(token => token.User)
-                .WithMany()
-                .HasForeignKey(token => token.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
 
         modelBuilder.Entity<AuditLog>(entity =>
         {

@@ -1,19 +1,17 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Linq.Expressions;
 using System.Net;
 using System.Security.Claims;
-using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
-using Microsoft.IdentityModel.Tokens;
 using MobyGuard.Auth;
 using MobyGuard.Classes;
-using MobyGuard.Configuration;
 using MobyGuard.Database.Context;
 using MobyGuard.Database.Dtos.UserDtos;
 using MobyGuard.Database.Models;
 using MobyGuard.Enumerators;
+using MobyGuard.Global;
 using MobyGuard.Helpers;
 using MobyGuard.Pagination;
 
@@ -21,7 +19,7 @@ namespace MobyGuard.Repos;
 
 public partial class UserRepository(
     DatabaseContext context,
-    IOptions<JwtOptions> jwtOptions,
+    IHttpContextAccessor httpContextAccessor,
     IUriService uriService,
     ILogger<UserRepository> logger,
     SessionService sessionService,
@@ -29,7 +27,6 @@ public partial class UserRepository(
 {
     private const int RootAdminUserId = 1;
     private static readonly SemaphoreSlim UserMutationLock = new(1, 1);
-    private readonly JwtOptions _jwtOptions = jwtOptions.Value;
 
     [GeneratedRegex(@"^[a-zA-Z0-9][a-zA-Z0-9._-]{1,63}$", RegexOptions.Compiled)]
     private static partial Regex UsernameRegex();
@@ -138,15 +135,13 @@ public partial class UserRepository(
 
                 setupTokenService.InvalidateToken();
 
-                var (accessToken, refreshToken) = await IssueAuthTokens(user.Id, user.Username, adminType.Type);
+                await IssueAuthCookie(user.Id, user.Username, adminType.Type);
 
                 return Result<LoginResponseDto>.Success(new LoginResponseDto
                 {
                     Id = user.Id,
                     Username = user.Username,
-                    UserType = adminType.Type,
-                    Token = accessToken,
-                    RefreshToken = refreshToken
+                    UserType = adminType.Type
                 });
             }
             finally
@@ -210,7 +205,7 @@ public partial class UserRepository(
 
             sessionService.ClearUserLoginRetries(user.Id, clientAddress);
 
-            var (accessToken, refreshToken) = await IssueAuthTokens(user.Id, user.Username, user.UserType!.Type);
+            await IssueAuthCookie(user.Id, user.Username, user.UserType!.Type);
 
             user.LastLogin = DateTime.UtcNow;
 
@@ -220,9 +215,7 @@ public partial class UserRepository(
             {
                 Id = user.Id,
                 Username = user.Username,
-                UserType = user.UserType!.Type,
-                Token = accessToken,
-                RefreshToken = refreshToken
+                UserType = user.UserType!.Type
             };
 
             return Result<LoginResponseDto>.Success(loginResponseDto);
@@ -235,59 +228,7 @@ public partial class UserRepository(
         }
     }
 
-    public async Task<Result<LoginResponseDto>> Refresh(RefreshTokenDto refreshTokenDto)
-    {
-        try
-        {
-            var (isValid, userId) = await sessionService.ConsumeRefreshToken(refreshTokenDto.RefreshToken);
-
-            if (!isValid)
-            {
-                return Result<LoginResponseDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidRefreshToken);
-            }
-
-            var user = await context.Users
-                .Include(u => u.UserType)
-                .FirstOrDefaultAsync(u => u.Id == userId);
-
-            if (user is null)
-            {
-                await sessionService.DeleteUserEntries(userId);
-                return Result<LoginResponseDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidRefreshToken);
-            }
-
-            if (!user.IsActive)
-            {
-                await sessionService.DeleteUserEntries(user.Id);
-                return Result<LoginResponseDto>.Failure(RepositoryStatus.Forbidden, ResponseMessages.UserIsInactive);
-            }
-
-            if (string.Equals(user.UserType?.Type, Roles.Service, StringComparison.OrdinalIgnoreCase))
-            {
-                await sessionService.DeleteUserEntries(user.Id);
-                return Result<LoginResponseDto>.Failure(RepositoryStatus.Forbidden, ResponseMessages.ServiceAccountCannotLogin);
-            }
-
-            var (accessToken, newRefreshToken) = await IssueAuthTokens(user.Id, user.Username, user.UserType!.Type);
-
-            return Result<LoginResponseDto>.Success(new LoginResponseDto
-            {
-                Id = user.Id,
-                Username = user.Username,
-                UserType = user.UserType!.Type,
-                Token = accessToken,
-                RefreshToken = newRefreshToken
-            });
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "An unexpected error occurred while refreshing session token");
-
-            return Result<LoginResponseDto>.Failure(RepositoryStatus.InternalServerError, ResponseMessages.InternalServerError);
-        }
-    }
-
-    public async Task<Result> Logout(RefreshTokenDto? refreshTokenDto, int callerId, string? jti)
+    public async Task<Result> Logout(int callerId, string? jti)
     {
         try
         {
@@ -296,9 +237,9 @@ public partial class UserRepository(
                 sessionService.RevokeAccessToken(callerId, jti);
             }
 
-            if (!string.IsNullOrWhiteSpace(refreshTokenDto?.RefreshToken))
+            if (httpContextAccessor.HttpContext is not null)
             {
-                await sessionService.RevokeRefreshToken(refreshTokenDto.RefreshToken);
+                await httpContextAccessor.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
             }
 
             return Result.Success();
@@ -528,7 +469,7 @@ public partial class UserRepository(
 
                 if (shouldInvalidateSessions)
                 {
-                    await sessionService.DeleteUserEntries(id);
+                    sessionService.DeleteUserEntries(id);
                 }
                 else
                 {
@@ -554,7 +495,9 @@ public partial class UserRepository(
     {
         try
         {
-            var user = await context.Users.FindAsync(callerId);
+            var user = await context.Users
+                .Include(u => u.UserType)
+                .FirstOrDefaultAsync(u => u.Id == callerId);
 
             if (user is null)
             {
@@ -573,7 +516,9 @@ public partial class UserRepository(
                 return Result.Failure(RepositoryStatus.BadRequest, passwordError);
             }
 
-            await SetPassword(user, changePasswordDto.Password, invalidateSessions: false);
+            await SetPassword(user, changePasswordDto.Password, invalidateSessions: true);
+
+            await IssueAuthCookie(user.Id, user.Username, user.UserType!.Type);
 
             return Result.Success();
         }
@@ -653,7 +598,7 @@ public partial class UserRepository(
 
             await context.SaveChangesAsync();
 
-            await sessionService.DeleteUserEntries(id);
+            sessionService.DeleteUserEntries(id);
 
             return Result.Success();
         }
@@ -677,7 +622,7 @@ public partial class UserRepository(
 
         if (invalidateSessions)
         {
-            await sessionService.DeleteUserEntries(user.Id);
+            sessionService.DeleteUserEntries(user.Id);
         }
         else
         {
@@ -685,38 +630,38 @@ public partial class UserRepository(
         }
     }
 
-    private async Task<(string AccessToken, string RefreshToken)> IssueAuthTokens(int userId, string username, string role)
+    private async Task IssueAuthCookie(int userId, string username, string role)
     {
         var jti = Guid.NewGuid().ToString("N");
-        var accessTokenExpiry = TimeSpan.FromMinutes(_jwtOptions.AccessTokenExpiryMinutes);
-        var refreshTokenExpiry = TimeSpan.FromDays(_jwtOptions.RefreshTokenExpiryDays);
+        var sessionExpiry = TimeSpan.FromDays(Variables.SessionExpiryDays);
 
-        var securityKey = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(_jwtOptions.SecurityKey));
-
-        var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+        sessionService.StoreActiveAccessToken(userId, jti, sessionExpiry);
 
         var claims = new[]
         {
-            new Claim(JwtRegisteredClaimNames.Sub, userId.ToString()),
-            new Claim(JwtRegisteredClaimNames.UniqueName, username),
-            new Claim("role", role),
-            new Claim(JwtRegisteredClaimNames.Jti, jti),
+            new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
+            new Claim(ClaimTypes.Name, username),
+            new Claim(ClaimTypes.Role, role),
+            new Claim("jti", jti),
         };
 
-        var token = new JwtSecurityToken(
-            issuer: _jwtOptions.Issuer,
-            audience: _jwtOptions.Audience,
-            claims: claims,
-            expires: DateTime.UtcNow.Add(accessTokenExpiry),
-            signingCredentials: credentials);
+        var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+        var principal = new ClaimsPrincipal(identity);
 
-        var accessToken = new JwtSecurityTokenHandler().WriteToken(token);
+        var authProperties = new AuthenticationProperties
+        {
+            IsPersistent = true,
+            ExpiresUtc = DateTimeOffset.UtcNow.Add(sessionExpiry),
+            AllowRefresh = true
+        };
 
-        sessionService.StoreActiveAccessToken(userId, jti, accessTokenExpiry);
-
-        var refreshToken = await sessionService.CreateRefreshToken(userId, refreshTokenExpiry);
-
-        return (accessToken, refreshToken);
+        if (httpContextAccessor.HttpContext is not null)
+        {
+            await httpContextAccessor.HttpContext.SignInAsync(
+                CookieAuthenticationDefaults.AuthenticationScheme,
+                principal,
+                authProperties);
+        }
     }
 
     private readonly Expression<Func<User, UserDto>> ToUserDto = user => new UserDto

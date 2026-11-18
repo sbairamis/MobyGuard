@@ -87,9 +87,11 @@ export default function App() {
           return
         }
         const existing = loadSession()
-        if (existing?.token) {
-          await api.get('/api/v1/User/me')
-          setUser(existing)
+        if (existing?.id) {
+          const me = await api.get('/api/v1/User/me')
+          const current = { id: me.id, username: me.username, userType: me.userType }
+          saveSession(current)
+          setUser(current)
         }
       } catch {
         saveSession(null)
@@ -108,12 +110,9 @@ export default function App() {
   }
 
   async function handleLogout() {
-    const existing = loadSession()
-    if (existing?.token) {
-      try {
-        await api.post('/api/v1/User/logout', { refreshToken: existing.refreshToken })
-      } catch {}
-    }
+    try {
+      await api.post('/api/v1/User/logout')
+    } catch {}
     saveSession(null)
     setUser(null)
   }
