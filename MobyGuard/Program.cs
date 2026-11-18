@@ -165,7 +165,6 @@ app.UseExceptionHandler();
 app.UseStatusCodePages();
 
 app.MapHealthChecks("/api/v1/health");
-app.MapHealthChecks("/api/health");
 
 using (var scope = app.Services.CreateScope())
 {
@@ -185,6 +184,7 @@ using (var scope = app.Services.CreateScope())
     }
 
     var retentionCutoff = DateTime.UtcNow.AddDays(-Variables.AuditLogRetentionDays);
+    
     dbContext.AuditLogs.Where(log => log.CreatedAt < retentionCutoff).ExecuteDelete();
 
     DbInitializer.Initialize(dbContext);
