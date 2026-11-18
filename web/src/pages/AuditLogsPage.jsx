@@ -81,10 +81,13 @@ export default function AuditLogsPage({ notify }) {
             style={{ width: 175 }}
           >
             <option value="0">All Fields (No Filter)</option>
-            <option value="1">By Username</option>
+            <option value="1">By Actor</option>
+            <option value="7">By Target</option>
+            <option value="9">By User ID</option>
             <option value="2">By Repository</option>
-            <option value="3">By Granted Actions</option>
+            <option value="3">By Actions</option>
             <option value="4">By Event Type</option>
+            <option value="8">By Details</option>
             <option value="5">By Client IP</option>
           </select>
 
@@ -103,7 +106,13 @@ export default function AuditLogsPage({ notify }) {
             <input
               type="text"
               disabled={searchBy === '0'}
-              placeholder={searchBy === '0' ? 'Select a filter field first…' : 'Enter search value…'}
+              placeholder={
+                searchBy === '0'
+                  ? 'Select a filter field first…'
+                  : searchBy === '9'
+                    ? 'Enter numeric user ID…'
+                    : 'Enter search value…'
+              }
               value={valueStr}
               onChange={(e) => setValueStr(e.target.value)}
               style={{ width: 260 }}
@@ -138,9 +147,11 @@ export default function AuditLogsPage({ notify }) {
               <tr>
                 <th>ID</th>
                 <th>Event</th>
-                <th>Username</th>
+                <th>Actor</th>
+                <th>Target</th>
                 <th>Repository / Scope</th>
                 <th>Actions</th>
+                <th>Details</th>
                 <th>Client IP</th>
                 <th>Timestamp</th>
               </tr>
@@ -148,13 +159,13 @@ export default function AuditLogsPage({ notify }) {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="empty">
+                  <td colSpan={9} className="empty">
                     <span className="spin" /> Loading audit logs…
                   </td>
                 </tr>
               ) : logs.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="empty">No matching audit logs found.</td>
+                  <td colSpan={9} className="empty">No matching audit logs found.</td>
                 </tr>
               ) : (
                 logs.map((log) => (
@@ -162,20 +173,33 @@ export default function AuditLogsPage({ notify }) {
                     <td className="mono muted">#{log.id}</td>
                     <td>
                       <span className={`badge ${
-                        log.description === 'Manifest_Deleted' || log.description === 'Permission_Deleted'
+                        log.description?.endsWith('_Deleted')
                           ? 'err'
-                          : log.description === 'Token_Issued' || log.description === 'Manifest_Pulled'
-                            ? 'info'
-                            : 'ok'
+                          : log.description?.startsWith('Password_')
+                            ? 'warn'
+                            : log.description === 'Token_Issued'
+                              || log.description === 'Manifest_Pulled'
+                              || log.description === 'Webhook_Tested'
+                              || log.description === 'Login_Succeeded'
+                              ? 'info'
+                              : 'ok'
                       }`}>
                         {log.description}
                       </span>
                     </td>
-                    <td><b>{log.username}</b></td>
-                    <td><code>{log.repository || '—'}</code></td>
+                    <td>
+                      <b>{log.username}</b>
+                      {log.actorUserId != null && <span className="mono muted"> #{log.actorUserId}</span>}
+                    </td>
+                    <td>
+                      {log.target ? <code>{log.target}</code> : '—'}
+                      {log.targetUserId != null && <span className="mono muted"> #{log.targetUserId}</span>}
+                    </td>
+                    <td>{log.repository ? <code>{log.repository}</code> : '—'}</td>
                     <td>
                       {log.actions ? <span className="badge accent">{log.actions}</span> : '—'}
                     </td>
+                    <td className="muted">{log.details || '—'}</td>
                     <td className="mono muted">{log.clientIp || '—'}</td>
                     <td className="muted">{formatDate(log.createdAt)}</td>
                   </tr>

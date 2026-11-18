@@ -15,7 +15,7 @@ namespace MobyGuard.Migrations
         protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
-            modelBuilder.HasAnnotation("ProductVersion", "10.0.9");
+            modelBuilder.HasAnnotation("ProductVersion", "10.0.15");
 
             modelBuilder.Entity("MobyGuard.Database.Models.AuditLog", b =>
                 {
@@ -26,6 +26,9 @@ namespace MobyGuard.Migrations
                     b.Property<string>("Actions")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("ActorUserId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("ClientIp")
                         .IsRequired()
@@ -38,9 +41,20 @@ namespace MobyGuard.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("Details")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("Repository")
                         .IsRequired()
                         .HasColumnType("TEXT");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("TargetUserId")
+                        .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
@@ -51,9 +65,15 @@ namespace MobyGuard.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("ActorUserId");
+
                     b.HasIndex("CreatedAt");
 
                     b.HasIndex("Description");
+
+                    b.HasIndex("Target");
+
+                    b.HasIndex("TargetUserId");
 
                     b.HasIndex("Username");
 

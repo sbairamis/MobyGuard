@@ -14,16 +14,17 @@ using MobyGuard.Enumerators;
 using MobyGuard.Global;
 using MobyGuard.Helpers;
 using MobyGuard.Pagination;
+using MobyGuard.Services;
 
 namespace MobyGuard.Repos;
 
 public partial class UserRepository(
     DatabaseContext context,
     IHttpContextAccessor httpContextAccessor,
-    IUriService uriService,
     ILogger<UserRepository> logger,
     SessionService sessionService,
-    SetupTokenService setupTokenService)
+    SetupTokenService setupTokenService,
+    AuditService audit)
 {
     private const int RootAdminUserId = 1;
     private static readonly SemaphoreSlim UserMutationLock = new(1, 1);
@@ -152,9 +153,14 @@ public partial class UserRepository(
                 };
 
                 context.Users.Add(user);
-                context.AuditLogs.Add(new AuditLog(
-                    username: user.Username,
-                    description: nameof(AuditLogEnums.Description.User_Created)));
+                await context.SaveChangesAsync();
+
+                audit.Record(
+                    AuditLogEnums.Description.Setup_Completed,
+                    target: user.Username,
+                    targetUserId: user.Id,
+                    details: AuditService.Describe(("role", adminType.Type)),
+                    actor: new AuditActor(user.Id, user.Username));
 
                 await context.SaveChangesAsync();
                 await transaction.CommitAsync();
@@ -235,6 +241,11 @@ public partial class UserRepository(
 
             user.LastLogin = DateTime.UtcNow;
 
+            audit.Record(
+                AuditLogEnums.Description.Login_Succeeded,
+                actor: new AuditActor(user.Id, user.Username),
+                clientAddress: clientAddress);
+
             await context.SaveChangesAsync();
 
             var loginResponseDto = new LoginResponseDto
@@ -278,7 +289,7 @@ public partial class UserRepository(
         }
     }
 
-    public async Task<Result<PagedResponse<List<UserDto>>>> GetAllWithTypePaged(UserQueryFilterDto filter, string route)
+    public async Task<Result<PagedResponse<List<UserDto>>>> GetAllWithTypePaged(UserQueryFilterDto filter)
     {
         try
         {
@@ -322,7 +333,7 @@ public partial class UserRepository(
                 .Select(ToUserDto)
                 .ToListAsync();
 
-            var pagedResponse = PaginationHelper.CreatePagedResponse(results, validFilter, totalRecords, uriService, route);
+            var pagedResponse = PaginationHelper.CreatePagedResponse(results, validFilter, totalRecords);
 
             return Result<PagedResponse<List<UserDto>>>.Success(pagedResponse);
         }
@@ -379,15 +390,19 @@ public partial class UserRepository(
                     UpdatedAt = DateTime.UtcNow
                 };
 
+                await using var transaction = await context.Database.BeginTransactionAsync();
+
                 context.Users.Add(user);
+                await context.SaveChangesAsync();
 
-                var auditLog = new AuditLog(
-                    username: normalizedUsername,
-                    description: nameof(AuditLogEnums.Description.User_Created));
-
-                context.AuditLogs.Add(auditLog);
+                audit.Record(
+                    AuditLogEnums.Description.User_Created,
+                    target: user.Username,
+                    targetUserId: user.Id,
+                    details: AuditService.Describe(("role", userType.Type)));
 
                 await context.SaveChangesAsync();
+                await transaction.CommitAsync();
 
                 return Result<UserDto>.Success(new UserDto
                 {
@@ -477,7 +492,12 @@ public partial class UserRepository(
                     return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.UserExists);
                 }
 
-                if (!await context.UserTypes.AnyAsync(userType => userType.Id == updateUserDto.UserTypeId))
+                var roleNames = await context.UserTypes
+                    .AsNoTracking()
+                    .Where(userType => userType.Id == updateUserDto.UserTypeId || userType.Id == user.UserTypeId)
+                    .ToDictionaryAsync(userType => userType.Id, userType => userType.Type);
+
+                if (!roleNames.TryGetValue(updateUserDto.UserTypeId, out var newRoleName))
                 {
                     return Result.Failure(RepositoryStatus.BadRequest, ResponseMessages.UserTypeNotFound);
                 }
@@ -486,10 +506,24 @@ public partial class UserRepository(
                                                || updateUserDto.UserTypeId != user.UserTypeId
                                                || normalizedUsername != user.Username;
 
+                var changeDetails = AuditService.Diff(
+                    ("username", user.Username, normalizedUsername),
+                    ("role", roleNames.GetValueOrDefault(user.UserTypeId), newRoleName),
+                    ("isActive", user.IsActive, updateUserDto.IsActive));
+
                 user.Username = normalizedUsername;
                 user.UserTypeId = updateUserDto.UserTypeId;
                 user.IsActive = updateUserDto.IsActive;
                 user.UpdatedAt = DateTime.UtcNow;
+
+                if (changeDetails.Length > 0)
+                {
+                    audit.Record(
+                        AuditLogEnums.Description.User_Updated,
+                        target: user.Username,
+                        targetUserId: user.Id,
+                        details: changeDetails);
+                }
 
                 await context.SaveChangesAsync();
 
@@ -542,6 +576,11 @@ public partial class UserRepository(
                 return Result.Failure(RepositoryStatus.BadRequest, passwordError);
             }
 
+            audit.Record(
+                AuditLogEnums.Description.Password_Changed,
+                target: user.Username,
+                targetUserId: user.Id);
+
             await SetPassword(user, changePasswordDto.Password, invalidateSessions: true);
 
             await IssueAuthCookie(user.Id, user.Username, user.UserType!.Type);
@@ -577,6 +616,11 @@ public partial class UserRepository(
             {
                 return Result.Failure(RepositoryStatus.BadRequest, passwordError);
             }
+
+            audit.Record(
+                AuditLogEnums.Description.Password_Reset,
+                target: user.Username,
+                targetUserId: user.Id);
 
             await SetPassword(user, resetPasswordDto.Password, invalidateSessions: true);
 
@@ -621,6 +665,12 @@ public partial class UserRepository(
             }
 
             context.Users.Remove(user);
+
+            audit.Record(
+                AuditLogEnums.Description.User_Deleted,
+                target: user.Username,
+                targetUserId: user.Id,
+                details: AuditService.Describe(("removedPermissions", permissions.Count)));
 
             await context.SaveChangesAsync();
 

@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -20,17 +21,23 @@ using MobyGuard.Enumerators;
 using MobyGuard.Global;
 using MobyGuard.Helpers;
 using MobyGuard.Seeders;
+using MobyGuard.Services;
+using Respawn;
 
 namespace Tests;
 
 public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
+    public const string WebhookSecret = "test-registry-webhook-secret";
+
     private readonly string _tempDirectory = Path.Combine(Path.GetTempPath(), "mobyguard-tests", Guid.NewGuid().ToString("N"));
     private string _dbPath = string.Empty;
     private string _certPath = string.Empty;
     private string _keyPath = string.Empty;
+    private DbConnection _dbConnection = default!;
+    private Respawner _respawner = default!;
 
-    public ValueTask InitializeAsync()
+    public async ValueTask InitializeAsync()
     {
         Directory.CreateDirectory(_tempDirectory);
         _dbPath = Path.Combine(_tempDirectory, "mobyguard-test.db");
@@ -39,7 +46,15 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         // Start the app so Program.cs creates and migrates the SQLite database.
         _ = Server;
 
-        return ValueTask.CompletedTask;
+        _dbConnection = new SqliteConnection($"Data Source={_dbPath}");
+        await _dbConnection.OpenAsync();
+
+        _respawner = await Respawner.CreateAsync(_dbConnection, new RespawnerOptions
+        {
+            DbAdapter = DbAdapter.Sqlite,
+            WithReseed = true,
+            TablesToIgnore = [new Respawn.Graph.Table("__EFMigrationsHistory")]
+        });
     }
 
     private void GenerateSelfSignedCert()
@@ -63,22 +78,15 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         RegistryHandler.Reset();
         OutboundWebhookHandler.Reset();
 
+        await _respawner.ResetAsync(_dbConnection);
+
         using var scope = Services.CreateScope();
 
         scope.ServiceProvider.GetRequiredService<SessionCacheService>().ClearAll();
+        scope.ServiceProvider.GetRequiredService<RetentionPolicySchedulerService>().ResetAuditPurgeSchedule();
         (scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>() as Microsoft.Extensions.Caching.Memory.MemoryCache)?.Compact(1.0);
 
         var dbContext = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
-
-        await dbContext.Database.ExecuteSqlRawAsync("""
-            DELETE FROM "AuditLogs";
-            DELETE FROM "RepositoryPermissions";
-            DELETE FROM "RetentionPolicies";
-            DELETE FROM "WebhookSubscriptions";
-            DELETE FROM "Users";
-            DELETE FROM "UserTypes";
-            UPDATE "sqlite_sequence" SET "seq" = 0 WHERE "name" IN ('AuditLogs', 'RepositoryPermissions', 'RetentionPolicies', 'WebhookSubscriptions', 'Users', 'UserTypes');
-            """);
 
         DbInitializer.Initialize(dbContext);
 
@@ -185,6 +193,11 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     public override async ValueTask DisposeAsync()
     {
         await base.DisposeAsync();
+
+        if (_dbConnection is not null)
+        {
+            await _dbConnection.DisposeAsync();
+        }
 
         SqliteConnection.ClearAllPools();
 

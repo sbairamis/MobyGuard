@@ -7,12 +7,13 @@ using MobyGuard.Database.Dtos.RepositoryPermissionDtos;
 using MobyGuard.Database.Models;
 using MobyGuard.Enumerators;
 using MobyGuard.Pagination;
+using MobyGuard.Services;
 
 namespace MobyGuard.Repos;
 
 public partial class RepositoryPermissionRepository(
     DatabaseContext context,
-    IUriService uriService,
+    AuditService audit,
     ILogger<RepositoryPermissionRepository> logger)
 {
     // Matches "*", "<namespace>/*", or valid Docker repository names ("team-a/app", "library/nginx", "my-app").
@@ -20,8 +21,7 @@ public partial class RepositoryPermissionRepository(
     private static partial Regex RepositoryPatternRegex();
 
     public async Task<Result<PagedResponse<List<RepositoryPermissionDto>>>> GetAllPaged(
-        RepositoryPermissionQueryFilterDto filter,
-        string route)
+        RepositoryPermissionQueryFilterDto filter)
     {
         try
         {
@@ -55,7 +55,7 @@ public partial class RepositoryPermissionRepository(
                 .Select(ToDto)
                 .ToListAsync();
 
-            var pagedResponse = PaginationHelper.CreatePagedResponse(results, validFilter, totalRecords, uriService, route);
+            var pagedResponse = PaginationHelper.CreatePagedResponse(results, validFilter, totalRecords);
 
             return Result<PagedResponse<List<RepositoryPermissionDto>>>.Success(pagedResponse);
         }
@@ -159,11 +159,12 @@ public partial class RepositoryPermissionRepository(
 
             context.RepositoryPermissions.Add(entity);
 
-            context.AuditLogs.Add(new AuditLog(
-                username: user.Username,
+            audit.Record(
+                AuditLogEnums.Description.Permission_Created,
+                target: user.Username,
+                targetUserId: user.Id,
                 repository: pattern,
-                actions: FormatActions(dto.CanPull, dto.CanPush, dto.CanDelete),
-                description: nameof(AuditLogEnums.Description.Permission_Created)));
+                actions: FormatActions(dto.CanPull, dto.CanPush, dto.CanDelete));
 
             await context.SaveChangesAsync();
 
@@ -219,17 +220,25 @@ public partial class RepositoryPermissionRepository(
                 return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.RepositoryPermissionExists);
             }
 
+            var changeDetails = AuditService.Diff(
+                ("pattern", entity.RepositoryPattern, pattern),
+                ("actions",
+                    FormatActions(entity.CanPull, entity.CanPush, entity.CanDelete),
+                    FormatActions(dto.CanPull, dto.CanPush, dto.CanDelete)));
+
             entity.RepositoryPattern = pattern;
             entity.CanPull = dto.CanPull;
             entity.CanPush = dto.CanPush;
             entity.CanDelete = dto.CanDelete;
             entity.UpdatedAt = DateTime.UtcNow;
 
-            context.AuditLogs.Add(new AuditLog(
-                username: entity.User?.Username ?? string.Empty,
+            audit.Record(
+                AuditLogEnums.Description.Permission_Updated,
+                target: entity.User?.Username,
+                targetUserId: entity.UserId,
                 repository: pattern,
                 actions: FormatActions(dto.CanPull, dto.CanPush, dto.CanDelete),
-                description: nameof(AuditLogEnums.Description.Permission_Updated)));
+                details: changeDetails);
 
             await context.SaveChangesAsync();
 
@@ -258,11 +267,12 @@ public partial class RepositoryPermissionRepository(
 
             context.RepositoryPermissions.Remove(entity);
 
-            context.AuditLogs.Add(new AuditLog(
-                username: entity.User?.Username ?? string.Empty,
+            audit.Record(
+                AuditLogEnums.Description.Permission_Deleted,
+                target: entity.User?.Username,
+                targetUserId: entity.UserId,
                 repository: entity.RepositoryPattern,
-                actions: FormatActions(entity.CanPull, entity.CanPush, entity.CanDelete),
-                description: nameof(AuditLogEnums.Description.Permission_Deleted)));
+                actions: FormatActions(entity.CanPull, entity.CanPush, entity.CanDelete));
 
             await context.SaveChangesAsync();
 

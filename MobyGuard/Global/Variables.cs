@@ -17,7 +17,7 @@ public static class Variables
 
         if (string.IsNullOrWhiteSpace(infoVersion))
         {
-            return "v1.0.0";
+            return "v0.0.0-dev";
         }
 
         var cleanVersion = infoVersion.Split('+', 2)[0].Trim();

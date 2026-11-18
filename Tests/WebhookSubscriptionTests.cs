@@ -5,7 +5,9 @@ using Microsoft.AspNetCore.Mvc;
 using MobyGuard.Classes;
 using MobyGuard.Database.Dtos.RegistryDtos;
 using MobyGuard.Database.Dtos.WebhookSubscriptionDtos;
+using MobyGuard.Database.Models;
 using MobyGuard.Enumerators;
+using MobyGuard.Pagination;
 
 namespace Tests;
 
@@ -88,6 +90,31 @@ public class WebhookSubscriptionTests : IClassFixture<CustomWebApplicationFactor
             $"/api/v1/WebhookSubscription/{created.Id}",
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, deleteRes.StatusCode);
+
+        // Verify audit trail records actor, target webhook name, and host (never full secret URL path)
+        var logs = await adminClient.GetFromJsonAsync<PagedResponse<List<AuditLog>>>(
+            "/api/v1/AuditLog?PageNumber=1&PageSize=20",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(logs);
+
+        Assert.Contains(logs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.Webhook_Created)
+            && l.Username == "Admin"
+            && l.Target == "DevOps Slack Alerts"
+            && l.Details.Contains("hooks.slack.com")
+            && !l.Details.Contains("T00/B00/X00"));
+
+        Assert.Contains(logs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.Webhook_Updated)
+            && l.Username == "Admin"
+            && l.Target == "DevOps Discord Alerts"
+            && l.Details.Contains("discord.com")
+            && !l.Details.Contains("12345/abcdef"));
+
+        Assert.Contains(logs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.Webhook_Deleted)
+            && l.Username == "Admin"
+            && l.Target == "DevOps Discord Alerts");
     }
 
     [Fact]
@@ -228,9 +255,14 @@ public class WebhookSubscriptionTests : IClassFixture<CustomWebApplicationFactor
             ]
         };
 
-        var pushEventRes = await adminClient.PostAsJsonAsync(
-            "/api/v1/Registry/events",
-            webhookEnvelope,
+        using var pushEventRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/Registry/events")
+        {
+            Content = JsonContent.Create(webhookEnvelope)
+        };
+        pushEventRequest.Headers.Add("X-Registry-Webhook-Secret", CustomWebApplicationFactory.WebhookSecret);
+
+        var pushEventRes = await adminClient.SendAsync(
+            pushEventRequest,
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, pushEventRes.StatusCode);
 
@@ -239,5 +271,16 @@ public class WebhookSubscriptionTests : IClassFixture<CustomWebApplicationFactor
         {
             Assert.Contains("team-a/demo-app:v2.0.0", req.Body);
         });
+
+        var auditLogs = await adminClient.GetFromJsonAsync<PagedResponse<List<AuditLog>>>(
+            "/api/v1/AuditLog?PageNumber=1&PageSize=20",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(auditLogs);
+        Assert.Contains(auditLogs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.Webhook_Tested)
+            && l.Username == "Admin"
+            && l.Target == "Slack Channel"
+            && l.Details.Contains("hooks.slack.com")
+            && !l.Details.Contains("T111/B222/S333"));
     }
 }

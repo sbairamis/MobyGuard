@@ -103,9 +103,7 @@ public class UserController(UserRepository repository) : CustomBaseController
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<PagedResponse<List<UserDto>>>> GetAllWithTypePaged([FromQuery] UserQueryFilterDto filter)
     {
-        var route = Request.Path.Value ?? string.Empty;
-
-        var result = await repository.GetAllWithTypePaged(filter, route);
+        var result = await repository.GetAllWithTypePaged(filter);
 
         return HandleResult(result);
     }

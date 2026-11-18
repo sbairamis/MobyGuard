@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Hosting;
 using MobyGuard.Classes;
 using MobyGuard.Database.Dtos.RegistryDtos;
 using MobyGuard.Database.Dtos.RepositoryPermissionDtos;
@@ -214,6 +215,7 @@ public class RegistryControllerTests : IClassFixture<CustomWebApplicationFactory
         _factory.RegistryHandler.AddDemoTag("v3.0.0");
 
         var anonymousClient = _factory.CreateClient();
+        anonymousClient.DefaultRequestHeaders.Add("X-Registry-Webhook-Secret", CustomWebApplicationFactory.WebhookSecret);
         var envelope = new RegistryEventEnvelopeDto
         {
             Events =
@@ -272,6 +274,20 @@ public class RegistryControllerTests : IClassFixture<CustomWebApplicationFactory
                     },
                     Request = new RegistryEventRequestDto { Addr = "[2001:db8::9]:41200" },
                     Actor = new RegistryEventActorDto { Name = "alice" }
+                },
+                // 5. Manifest pull by an existing DB user ("User") should also resolve ActorUserId
+                new RegistryEventItemDto
+                {
+                    Id = "evt-pull-2",
+                    Action = "pull",
+                    Target = new RegistryEventTargetDto
+                    {
+                        MediaType = "application/vnd.oci.image.manifest.v1+json",
+                        Repository = "team-a/demo-app",
+                        Tag = "v3.0.0"
+                    },
+                    Request = new RegistryEventRequestDto { Addr = "198.51.100.43:12345" },
+                    Actor = new RegistryEventActorDto { Name = "User" }
                 }
             ]
         };
@@ -284,7 +300,7 @@ public class RegistryControllerTests : IClassFixture<CustomWebApplicationFactory
 
         var webhookBody = await webhookRes.Content.ReadFromJsonAsync<RegistryWebhookResultDto>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(webhookBody);
-        Assert.Equal(2, webhookBody.ProcessedEvents);
+        Assert.Equal(3, webhookBody.ProcessedEvents);
 
         // Cache was automatically invalidated by the push webhook, so GetTags returns v3.0.0 immediately without ?refresh=true
         var tagsAfterPush = await adminClient.GetFromJsonAsync<RegistryRepositoryTagsDto>(
@@ -304,11 +320,97 @@ public class RegistryControllerTests : IClassFixture<CustomWebApplicationFactory
             && l.ClientIp == "198.51.100.42");
         Assert.Contains(auditLogs.Data, l =>
             l.Username == "alice"
+            && l.ActorUserId == null
             && l.Repository == "team-a/demo-app:v3.0.0"
             && l.Actions == "pull"
             && l.Description == nameof(AuditLogEnums.Description.Manifest_Pulled)
             && l.ClientIp == "2001:db8::9");
+        Assert.Contains(auditLogs.Data, l =>
+            l.Username == "User"
+            && l.ActorUserId == (int)PrimaryKeys.UserTypes.User
+            && l.Repository == "team-a/demo-app:v3.0.0"
+            && l.Actions == "pull"
+            && l.Description == nameof(AuditLogEnums.Description.Manifest_Pulled)
+            && l.ClientIp == "198.51.100.43");
     }
+
+    [Fact]
+    public async Task ReceiveWebhookEvents_RejectsMissingOrInvalidSecret_WithoutWritingAuditLogs()
+    {
+        var envelope = BuildSinglePushEnvelope();
+
+        var missingSecretClient = _factory.CreateClient();
+        var missingRes = await missingSecretClient.PostAsJsonAsync(
+            "/api/v1/Registry/events",
+            envelope,
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, missingRes.StatusCode);
+
+        var wrongSecretClient = _factory.CreateClient();
+        wrongSecretClient.DefaultRequestHeaders.Add("X-Registry-Webhook-Secret", "not-the-secret");
+        var wrongRes = await wrongSecretClient.PostAsJsonAsync(
+            "/api/v1/Registry/events",
+            envelope,
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, wrongRes.StatusCode);
+
+        var bearerClient = _factory.CreateClient();
+        bearerClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {CustomWebApplicationFactory.WebhookSecret}");
+        var bearerRes = await bearerClient.PostAsJsonAsync(
+            "/api/v1/Registry/events",
+            envelope,
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, bearerRes.StatusCode);
+
+        var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+        var auditLogs = await adminClient.GetFromJsonAsync<PagedResponse<List<AuditLog>>>(
+            "/api/v1/AuditLog?PageNumber=1&PageSize=50",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(auditLogs);
+        Assert.Single(auditLogs.Data, l => l.Username == "attacker" && l.Actions == "push");
+    }
+
+    [Fact]
+    public async Task ReceiveWebhookEvents_ReturnsUnauthorized_WhenWebhookSecretIsNotConfigured()
+    {
+        await using var unconfiguredFactory = _factory.WithWebHostBuilder(builder =>
+            builder.UseSetting("RegistryTokenOptions:WebhookSecret", string.Empty));
+
+        var client = unconfiguredFactory.CreateClient();
+
+        var noHeaderRes = await client.PostAsJsonAsync(
+            "/api/v1/Registry/events",
+            BuildSinglePushEnvelope(),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, noHeaderRes.StatusCode);
+
+        client.DefaultRequestHeaders.Add("X-Registry-Webhook-Secret", "anything");
+        var anyHeaderRes = await client.PostAsJsonAsync(
+            "/api/v1/Registry/events",
+            BuildSinglePushEnvelope(),
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Unauthorized, anyHeaderRes.StatusCode);
+    }
+
+    private static RegistryEventEnvelopeDto BuildSinglePushEnvelope() => new()
+    {
+        Events =
+        [
+            new RegistryEventItemDto
+            {
+                Id = "evt-push-auth",
+                Action = "push",
+                Target = new RegistryEventTargetDto
+                {
+                    MediaType = "application/vnd.oci.image.manifest.v1+json",
+                    Repository = "team-a/demo-app",
+                    Tag = "v9.9.9",
+                    Digest = FakeDockerRegistryHandler.DemoDigest
+                },
+                Actor = new RegistryEventActorDto { Name = "attacker" }
+            }
+        ]
+    };
 
     [Fact]
     public async Task GetManifest_MultiArchIndex_ResolvesDefaultPlatformAndSupportsPlatformSelection()

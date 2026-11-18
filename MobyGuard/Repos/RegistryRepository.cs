@@ -25,6 +25,7 @@ public class RegistryRepository(
     IMemoryCache cache,
     IOptions<RegistryTokenOptions> registryOptions,
     OutboundWebhookDispatcher webhookDispatcher,
+    AuditService audit,
     ILogger<RegistryRepository> logger)
 {
     private const string CatalogCacheKey = "registry:catalog:repositories";
@@ -559,12 +560,12 @@ public class RegistryRepository(
 
             InvalidateRepositoryCache(repoName);
 
-            context.AuditLogs.Add(new AuditLog(
-                username: user.Username,
+            audit.Record(
+                AuditLogEnums.Description.Manifest_Deleted,
                 repository: $"{repoName}:{refTrimmed}",
                 actions: "delete",
-                description: nameof(AuditLogEnums.Description.Manifest_Deleted),
-                clientIp: clientAddress?.ToString() ?? string.Empty));
+                actor: new AuditActor(user.Id, user.Username),
+                clientAddress: clientAddress);
 
             await context.SaveChangesAsync();
 
@@ -591,24 +592,43 @@ public class RegistryRepository(
     {
         try
         {
-            if (!string.IsNullOrWhiteSpace(_options.WebhookSecret))
+            if (string.IsNullOrWhiteSpace(_options.WebhookSecret) || string.IsNullOrEmpty(providedSecret))
             {
-                if (string.IsNullOrEmpty(providedSecret))
-                {
-                    return Result<RegistryWebhookResultDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidCredentials);
-                }
+                return Result<RegistryWebhookResultDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidCredentials);
+            }
 
-                var expectedBytes = Encoding.UTF8.GetBytes(_options.WebhookSecret);
-                var actualBytes = Encoding.UTF8.GetBytes(providedSecret);
-                if (!CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes))
-                {
-                    return Result<RegistryWebhookResultDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidCredentials);
-                }
+            var expectedBytes = Encoding.UTF8.GetBytes(_options.WebhookSecret);
+            var actualBytes = Encoding.UTF8.GetBytes(providedSecret);
+            if (!CryptographicOperations.FixedTimeEquals(expectedBytes, actualBytes))
+            {
+                return Result<RegistryWebhookResultDto>.Failure(RepositoryStatus.Unauthorized, ResponseMessages.InvalidCredentials);
             }
 
             if (envelope?.Events is null || envelope.Events.Count == 0)
             {
                 return Result<RegistryWebhookResultDto>.Success(new RegistryWebhookResultDto { ProcessedEvents = 0 });
+            }
+
+            var actorNames = envelope.Events
+                .Select(e => e.Actor?.Name?.Trim())
+                .Where(name => !string.IsNullOrWhiteSpace(name) && !string.Equals(name, "mobyguard-ui", StringComparison.OrdinalIgnoreCase))
+                .Select(name => name!.ToLowerInvariant())
+                .Distinct()
+                .ToList();
+
+            var actorUserIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            if (actorNames.Count > 0)
+            {
+                var matchedUsers = await context.Users
+                    .AsNoTracking()
+                    .Where(u => actorNames.Contains(u.Username.ToLower()))
+                    .Select(u => new { u.Id, u.Username })
+                    .ToListAsync();
+
+                foreach (var matched in matchedUsers)
+                {
+                    actorUserIds[matched.Username] = matched.Id;
+                }
             }
 
             var processed = 0;
@@ -638,15 +658,15 @@ public class RegistryRepository(
                 }
 
                 var action = ev.Action?.Trim().ToLowerInvariant() ?? string.Empty;
-                string? description = action switch
+                AuditLogEnums.Description? description = action switch
                 {
-                    "push" => nameof(AuditLogEnums.Description.Manifest_Pushed),
-                    "pull" => nameof(AuditLogEnums.Description.Manifest_Pulled),
-                    "delete" => nameof(AuditLogEnums.Description.Manifest_Deleted),
+                    "push" => AuditLogEnums.Description.Manifest_Pushed,
+                    "pull" => AuditLogEnums.Description.Manifest_Pulled,
+                    "delete" => AuditLogEnums.Description.Manifest_Deleted,
                     _ => null
                 };
 
-                if (description is null)
+                if (!description.HasValue)
                 {
                     continue;
                 }
@@ -661,16 +681,22 @@ public class RegistryRepository(
                     InvalidateRepositoryCache(repoName);
                 }
 
-                var clientIp = ExtractClientIpFromAddr(ev.Request?.Addr) ?? callerAddress?.ToString() ?? string.Empty;
+                var extractedIp = ExtractClientIpFromAddr(ev.Request?.Addr);
+                var eventIp = extractedIp is not null && IPAddress.TryParse(extractedIp, out var parsedEventIp)
+                    ? parsedEventIp
+                    : callerAddress;
 
-                var actorDisplay = !string.IsNullOrWhiteSpace(actorName) ? actorName : "anonymous";
+                var actorDisplay = !string.IsNullOrWhiteSpace(actorName) ? actorName : AuditService.AnonymousActor;
+                int? actorUserId = !string.IsNullOrWhiteSpace(actorName) && actorUserIds.TryGetValue(actorName, out var matchedId)
+                    ? matchedId
+                    : null;
 
-                context.AuditLogs.Add(new AuditLog(
-                    username: actorDisplay,
+                audit.Record(
+                    description.Value,
                     repository: !string.IsNullOrWhiteSpace(reference) ? $"{repoName}:{reference}" : repoName,
                     actions: action,
-                    description: description,
-                    clientIp: clientIp));
+                    actor: new AuditActor(actorUserId, actorDisplay),
+                    clientAddress: eventIp);
 
                 if (action is "push" or "delete")
                 {
@@ -754,12 +780,12 @@ public class RegistryRepository(
                 return Result<RegistryGarbageCollectionStatusDto>.Failure(RepositoryStatus.NotFound, ResponseMessages.UserNotFound);
             }
 
-            context.AuditLogs.Add(new AuditLog(
-                username: user.Username,
+            audit.Record(
+                AuditLogEnums.Description.Garbage_Collection_Acknowledged,
                 repository: "registry",
                 actions: "gc",
-                description: nameof(AuditLogEnums.Description.Garbage_Collection_Acknowledged),
-                clientIp: clientAddress?.ToString() ?? string.Empty));
+                actor: new AuditActor(user.Id, user.Username),
+                clientAddress: clientAddress);
 
             await context.SaveChangesAsync();
 

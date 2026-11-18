@@ -12,6 +12,7 @@ namespace MobyGuard.Repos;
 public class WebhookSubscriptionRepository(
     DatabaseContext context,
     OutboundWebhookDispatcher dispatcher,
+    AuditService audit,
     ILogger<WebhookSubscriptionRepository> logger)
 {
     private static readonly string[] SupportedProviders =
@@ -94,6 +95,17 @@ public class WebhookSubscriptionRepository(
             };
 
             context.WebhookSubscriptions.Add(entity);
+
+            audit.Record(
+                AuditLogEnums.Description.Webhook_Created,
+                target: entity.Name,
+                repository: entity.RepositoryPattern,
+                actions: FormatEvents(entity.NotifyOnPush, entity.NotifyOnDelete, entity.NotifyOnRetention),
+                details: AuditService.Describe(
+                    ("provider", entity.Provider),
+                    ("host", GetHost(entity.TargetUrl)),
+                    ("enabled", entity.IsEnabled)));
+
             await context.SaveChangesAsync();
 
             return Result<WebhookSubscriptionDto>.Success(MapToDto(entity));
@@ -126,6 +138,23 @@ public class WebhookSubscriptionRepository(
                 return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.WebhookSubscriptionExists);
             }
 
+            var changeDetails = AuditService.Diff(
+                ("name", entity.Name, normalizedName),
+                ("provider", entity.Provider, normalizedProvider),
+                ("host", GetHost(entity.TargetUrl), GetHost(normalizedUrl)),
+                ("pattern", entity.RepositoryPattern, normalizedPattern),
+                ("events",
+                    FormatEvents(entity.NotifyOnPush, entity.NotifyOnDelete, entity.NotifyOnRetention),
+                    FormatEvents(dto.NotifyOnPush, dto.NotifyOnDelete, dto.NotifyOnRetention)),
+                ("enabled", entity.IsEnabled, dto.IsEnabled));
+
+            // The full URL is a credential, so only record that it changed (e.g. token rotation on the same host).
+            if (!string.Equals(entity.TargetUrl, normalizedUrl, StringComparison.Ordinal)
+                && string.Equals(GetHost(entity.TargetUrl), GetHost(normalizedUrl), StringComparison.OrdinalIgnoreCase))
+            {
+                changeDetails = string.IsNullOrEmpty(changeDetails) ? "url: changed" : $"{changeDetails}; url: changed";
+            }
+
             entity.Name = normalizedName;
             entity.Provider = normalizedProvider;
             entity.TargetUrl = normalizedUrl;
@@ -135,6 +164,16 @@ public class WebhookSubscriptionRepository(
             entity.NotifyOnRetention = dto.NotifyOnRetention;
             entity.IsEnabled = dto.IsEnabled;
             entity.UpdatedAt = DateTime.UtcNow;
+
+            if (changeDetails.Length > 0)
+            {
+                audit.Record(
+                    AuditLogEnums.Description.Webhook_Updated,
+                    target: entity.Name,
+                    repository: entity.RepositoryPattern,
+                    actions: FormatEvents(entity.NotifyOnPush, entity.NotifyOnDelete, entity.NotifyOnRetention),
+                    details: changeDetails);
+            }
 
             await context.SaveChangesAsync();
 
@@ -158,6 +197,16 @@ public class WebhookSubscriptionRepository(
             }
 
             context.WebhookSubscriptions.Remove(entity);
+
+            audit.Record(
+                AuditLogEnums.Description.Webhook_Deleted,
+                target: entity.Name,
+                repository: entity.RepositoryPattern,
+                actions: FormatEvents(entity.NotifyOnPush, entity.NotifyOnDelete, entity.NotifyOnRetention),
+                details: AuditService.Describe(
+                    ("provider", entity.Provider),
+                    ("host", GetHost(entity.TargetUrl))));
+
             await context.SaveChangesAsync();
 
             return Result.Success();
@@ -190,6 +239,15 @@ public class WebhookSubscriptionRepository(
                 repositoryScope: entity.RepositoryPattern,
                 eventType: "Webhook_Test");
 
+            audit.Record(
+                AuditLogEnums.Description.Webhook_Tested,
+                target: entity.Name,
+                details: AuditService.Describe(
+                    ("provider", entity.Provider),
+                    ("host", GetHost(entity.TargetUrl)),
+                    ("statusCode", delivery.StatusCode),
+                    ("success", delivery.Success)));
+
             await context.SaveChangesAsync();
 
             return Result<WebhookDeliveryResultDto>.Success(delivery);
@@ -199,6 +257,18 @@ public class WebhookSubscriptionRepository(
             logger.LogError(ex, "An unexpected error occurred while testing webhook subscription {Id}.", id);
             return Result<WebhookDeliveryResultDto>.Failure(RepositoryStatus.InternalServerError, ResponseMessages.InternalServerError);
         }
+    }
+
+    private static string GetHost(string? url)
+        => Uri.TryCreate(url, UriKind.Absolute, out var parsed) ? parsed.Host : "—";
+
+    private static string FormatEvents(bool push, bool delete, bool retention)
+    {
+        var events = new List<string>(3);
+        if (push) events.Add("push");
+        if (delete) events.Add("delete");
+        if (retention) events.Add("retention");
+        return string.Join(",", events);
     }
 
     private static string? ValidateDto(

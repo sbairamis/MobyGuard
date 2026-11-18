@@ -13,8 +13,8 @@ COPY web/ ./
 
 RUN npm run build
 
-FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
-SHELL ["/bin/bash", "-c"]
+FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0-alpine AS build
+SHELL ["/bin/sh", "-c"]
 ARG TARGETARCH
 ARG APP_VERSION=""
 
@@ -39,20 +39,27 @@ RUN dotnet publish ./MobyGuard/MobyGuard.csproj \
       -o /app/out \
     && cp ./MobyGuard/appsettings.example.json /app/out/appsettings.json
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-alpine AS final
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/* \
+ARG UID=10001
+RUN adduser \
+    --disabled-password \
+    --gecos "" \
+    --home "/nonexistent" \
+    --shell "/sbin/nologin" \
+    --no-create-home \
+    --uid "${UID}" \
+    appuser \
+    && apk add --no-cache curl \
     && mkdir -p /app/certs /app/data \
-    && chown -R app:app /app
+    && chown -R appuser:appuser /app
 
-COPY --from=build --chown=app:app /app/out .
-COPY --from=ui --chown=app:app /MobyGuard/wwwroot ./wwwroot
+COPY --from=build --chown=appuser:appuser /app/out .
+COPY --from=ui --chown=appuser:appuser /MobyGuard/wwwroot ./wwwroot
 
-USER app
+USER appuser
 
 EXPOSE 5090
 

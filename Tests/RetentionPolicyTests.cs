@@ -1,11 +1,17 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using MobyGuard.Classes;
+using MobyGuard.Database.Context;
 using MobyGuard.Database.Dtos.RegistryDtos;
 using MobyGuard.Database.Dtos.RetentionPolicyDtos;
+using MobyGuard.Database.Models;
 using MobyGuard.Enumerators;
+using MobyGuard.Global;
+using MobyGuard.Pagination;
+using MobyGuard.Services;
 
 namespace Tests;
 
@@ -124,6 +130,27 @@ public class RetentionPolicyTests : IClassFixture<CustomWebApplicationFactory>, 
             $"/api/v1/RetentionPolicy/{created.Id}",
             TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NoContent, deleteRes.StatusCode);
+
+        var logs = await adminClient.GetFromJsonAsync<PagedResponse<List<AuditLog>>>(
+            "/api/v1/AuditLog?PageNumber=1&PageSize=20",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(logs);
+
+        Assert.Contains(logs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.Retention_Policy_Created)
+            && l.Username == "Admin"
+            && l.Target == "Team-A CI Retention"
+            && l.Repository == "team-a/*");
+
+        Assert.Contains(logs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.Retention_Policy_Updated)
+            && l.Username == "Admin"
+            && l.Target == "Team-A Updated Policy");
+
+        Assert.Contains(logs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.Retention_Policy_Deleted)
+            && l.Username == "Admin"
+            && l.Target == "Team-A Updated Policy");
     }
 
     [Fact]
@@ -264,5 +291,60 @@ public class RetentionPolicyTests : IClassFixture<CustomWebApplicationFactory>, 
         Assert.NotNull(tagsAfterScheduledRun);
         Assert.Contains("scheduled-keep", tagsAfterScheduledRun.Tags);
         Assert.DoesNotContain("scheduled-drop", tagsAfterScheduledRun.Tags);
+    }
+
+    [Fact]
+    public async Task SchedulerMaintenanceTick_PurgesExpiredAuditLogsOnSchedule_WithoutDeletingRecentRows()
+    {
+        var nowUtc = DateTime.UtcNow;
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
+            db.AuditLogs.AddRange(
+                new AuditLog("old-user", "repo/old", "pull", nameof(AuditLogEnums.Description.Token_Issued))
+                {
+                    CreatedAt = nowUtc.AddDays(-(Variables.AuditLogRetentionDays + 5)),
+                    UpdatedAt = nowUtc.AddDays(-(Variables.AuditLogRetentionDays + 5))
+                },
+                new AuditLog("recent-user", "repo/recent", "pull", nameof(AuditLogEnums.Description.Token_Issued))
+                {
+                    CreatedAt = nowUtc.AddDays(-1),
+                    UpdatedAt = nowUtc.AddDays(-1)
+                });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        var scheduler = _factory.Services.GetRequiredService<RetentionPolicySchedulerService>();
+
+        var (_, firstPurged) = await scheduler.RunMaintenanceTickAsync(nowUtc, TestContext.Current.CancellationToken);
+        Assert.Equal(1, firstPurged);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
+            Assert.False(await db.AuditLogs.AnyAsync(a => a.Username == "old-user", TestContext.Current.CancellationToken));
+            Assert.True(await db.AuditLogs.AnyAsync(a => a.Username == "recent-user", TestContext.Current.CancellationToken));
+
+            // Add another expired row and confirm hourly throttling skips cleanup 5 minutes later, then purges 2 hours later
+            db.AuditLogs.Add(new AuditLog("expired-later", "repo/later", "pull", nameof(AuditLogEnums.Description.Token_Issued))
+            {
+                CreatedAt = nowUtc.AddDays(-(Variables.AuditLogRetentionDays + 1)),
+                UpdatedAt = nowUtc.AddDays(-(Variables.AuditLogRetentionDays + 1))
+            });
+            await db.SaveChangesAsync(TestContext.Current.CancellationToken);
+        }
+
+        var (_, skippedPurge) = await scheduler.RunMaintenanceTickAsync(nowUtc.AddMinutes(5), TestContext.Current.CancellationToken);
+        Assert.Equal(0, skippedPurge);
+
+        var (_, secondPurged) = await scheduler.RunMaintenanceTickAsync(nowUtc.AddHours(2), TestContext.Current.CancellationToken);
+        Assert.Equal(1, secondPurged);
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<DatabaseContext>();
+            Assert.False(await db.AuditLogs.AnyAsync(a => a.Username == "expired-later", TestContext.Current.CancellationToken));
+        }
     }
 }

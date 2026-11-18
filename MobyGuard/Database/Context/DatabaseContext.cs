@@ -38,6 +38,9 @@ public class DatabaseContext(DbContextOptions<DatabaseContext> options) : DbCont
             entity.HasIndex(log => log.CreatedAt);
             entity.HasIndex(log => log.Username);
             entity.HasIndex(log => log.Description);
+            entity.HasIndex(log => log.Target);
+            entity.HasIndex(log => log.ActorUserId);
+            entity.HasIndex(log => log.TargetUserId);
         });
 
         modelBuilder.Entity<RetentionPolicy>(entity =>

@@ -17,9 +17,7 @@ public class RepositoryPermissionController(RepositoryPermissionRepository repos
     public async Task<ActionResult<PagedResponse<List<RepositoryPermissionDto>>>> GetAllPaged(
         [FromQuery] RepositoryPermissionQueryFilterDto filter)
     {
-        var route = Request.Path.Value ?? string.Empty;
-
-        var result = await repository.GetAllPaged(filter, route);
+        var result = await repository.GetAllPaged(filter);
 
         return HandleResult(result);
     }

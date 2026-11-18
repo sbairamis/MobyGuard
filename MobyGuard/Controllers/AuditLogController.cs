@@ -30,9 +30,7 @@ public class AuditLogController(AuditLogRepository repository) : CustomBaseContr
         [FromQuery] LogsSearchRequestDto logsSearchRequestDto,
         [FromQuery] PaginationFilter filter)
     {
-        var route = Request.Path.Value ?? string.Empty;
-
-        var result = await repository.Search(logsSearchRequestDto, filter, route);
+        var result = await repository.Search(logsSearchRequestDto, filter);
 
         return HandleResult(result);
     }

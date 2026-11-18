@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc;
 using MobyGuard.Classes;
 using MobyGuard.Database.Dtos.RepositoryPermissionDtos;
+using MobyGuard.Database.Models;
 using MobyGuard.Enumerators;
 using MobyGuard.Pagination;
 
@@ -159,6 +160,33 @@ public class RepositoryPermissionControllerTests : IClassFixture<CustomWebApplic
 
         var getAfterDelete = await client.GetAsync($"/api/v1/RepositoryPermission/{created.Id}", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.NotFound, getAfterDelete.StatusCode);
+
+        var logs = await client.GetFromJsonAsync<PagedResponse<List<AuditLog>>>(
+            "/api/v1/AuditLog?PageNumber=1&PageSize=20",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(logs);
+
+        Assert.Contains(logs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.Permission_Created)
+            && l.Username == "Admin"
+            && l.ActorUserId == (int)PrimaryKeys.UserTypes.Admin
+            && l.Target == "User"
+            && l.TargetUserId == (int)PrimaryKeys.UserTypes.User
+            && l.Repository == "mobyguard/app");
+
+        Assert.Contains(logs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.Permission_Updated)
+            && l.Username == "Admin"
+            && l.Target == "User"
+            && l.TargetUserId == (int)PrimaryKeys.UserTypes.User
+            && l.Details.Contains("mobyguard/app → mobyguard/app-v2"));
+
+        Assert.Contains(logs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.Permission_Deleted)
+            && l.Username == "Admin"
+            && l.Target == "User"
+            && l.TargetUserId == (int)PrimaryKeys.UserTypes.User
+            && l.Repository == "mobyguard/app-v2");
     }
 
     [Fact]

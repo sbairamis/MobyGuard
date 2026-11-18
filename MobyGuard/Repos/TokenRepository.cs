@@ -8,6 +8,7 @@ using MobyGuard.Database.Dtos.TokenDtos;
 using MobyGuard.Database.Models;
 using MobyGuard.Enumerators;
 using MobyGuard.Helpers;
+using MobyGuard.Services;
 
 namespace MobyGuard.Repos;
 
@@ -15,6 +16,7 @@ public class TokenRepository(
     DatabaseContext context,
     RegistryTokenSigner tokenSigner,
     SessionService sessionService,
+    AuditService audit,
     ILogger<TokenRepository> logger)
 {
     public async Task<Result<RegistryTokenResponseDto>> IssueToken(
@@ -89,12 +91,13 @@ public class TokenRepository(
                 ? string.Join(";", accessEntries.Select(a => string.Join(",", a.Actions)))
                 : "auth";
 
-            context.AuditLogs.Add(new AuditLog(
-                username: user.Username,
+            audit.Record(
+                AuditLogEnums.Description.Token_Issued,
                 repository: loggedRepo,
                 actions: loggedActions,
-                description: nameof(AuditLogEnums.Description.Token_Issued),
-                clientIp: clientAddress?.ToString() ?? string.Empty));
+                details: string.IsNullOrWhiteSpace(service) ? null : AuditService.Describe(("service", service)),
+                actor: new AuditActor(user.Id, user.Username),
+                clientAddress: clientAddress);
 
             await context.SaveChangesAsync();
 

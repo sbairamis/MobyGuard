@@ -28,6 +28,19 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version from git tag
+        id: version
+        run: |
+          if EXACT_TAG=$(git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --exact-match 2>/dev/null); then
+            echo "dotnet_version=${EXACT_TAG#v}" >> "$GITHUB_OUTPUT"
+          elif LATEST_TAG=$(git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --abbrev=0 2>/dev/null); then
+            echo "dotnet_version=${LATEST_TAG#v}-dev" >> "$GITHUB_OUTPUT"
+          else
+            echo "dotnet_version=" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v6
@@ -46,7 +59,9 @@ jobs:
         run: dotnet restore MobyGuard.sln
 
       - name: Build solution
-        run: dotnet build MobyGuard.sln --configuration Release --no-restore
+        env:
+          DOTNET_VERSION: ${{ steps.version.outputs.dotnet_version }}
+        run: dotnet build MobyGuard.sln --configuration Release --no-restore ${DOTNET_VERSION:+-p:Version="$DOTNET_VERSION"}
 
       - name: Run tests with code coverage
         run: dotnet test --solution MobyGuard.sln --configuration Release --no-build --no-ansi --output Detailed --coverage --coverage-output-format cobertura --coverage-output coverage.cobertura.xml --coverage-settings Tests/coverage.settings.xml
@@ -118,6 +133,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Resolve release state
         id: meta
@@ -125,12 +142,21 @@ jobs:
           if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
             echo "is_release=true" >> "$GITHUB_OUTPUT"
             echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "app_version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
           elif [[ "${{ needs.release.outputs.released }}" == "true" ]]; then
             echo "is_release=true" >> "$GITHUB_OUTPUT"
             echo "tag=${{ needs.release.outputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "app_version=${{ needs.release.outputs.tag }}" >> "$GITHUB_OUTPUT"
           else
             echo "is_release=false" >> "$GITHUB_OUTPUT"
             echo "tag=" >> "$GITHUB_OUTPUT"
+            if EXACT_TAG=$(git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --exact-match 2>/dev/null); then
+              echo "app_version=${EXACT_TAG}" >> "$GITHUB_OUTPUT"
+            elif LATEST_TAG=$(git describe --tags --match 'v[0-9]*.[0-9]*.[0-9]*' --abbrev=0 2>/dev/null); then
+              echo "app_version=${LATEST_TAG}-dev" >> "$GITHUB_OUTPUT"
+            else
+              echo "app_version=" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Set up QEMU
@@ -160,7 +186,7 @@ jobs:
           push: ${{ steps.meta.outputs.is_release == 'true' }}
           platforms: ${{ steps.meta.outputs.is_release == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           build-args: |
-            APP_VERSION=${{ steps.meta.outputs.tag }}
+            APP_VERSION=${{ steps.meta.outputs.app_version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |

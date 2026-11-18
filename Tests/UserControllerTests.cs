@@ -8,10 +8,13 @@ using Microsoft.Extensions.Options;
 using MobyGuard.Auth;
 using MobyGuard.Classes;
 using MobyGuard.Database.Context;
+using MobyGuard.Database.Dtos.AuditLogDtos;
 using MobyGuard.Database.Dtos.UserDtos;
+using MobyGuard.Database.Models;
 using MobyGuard.Enumerators;
 using MobyGuard.Global;
 using MobyGuard.Helpers;
+using MobyGuard.Pagination;
 
 namespace Tests;
 
@@ -273,7 +276,8 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         var statusBefore = await client.GetFromJsonAsync<SetupStatusDto>("/api/v1/User/setup-status", TestContext.Current.CancellationToken);
         Assert.NotNull(statusBefore);
         Assert.True(statusBefore.SetupRequired);
-        Assert.Equal("v1.0.8", statusBefore.ApiVersion);
+        Assert.Equal(Variables.AppVersion, statusBefore.ApiVersion);
+        Assert.StartsWith("v", statusBefore.ApiVersion, StringComparison.Ordinal);
 
         var setupTokenService = _factory.Services.GetRequiredService<SetupTokenService>();
         var activeSetupToken = setupTokenService.CurrentToken;
@@ -338,6 +342,19 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
             TestContext.Current.CancellationToken);
 
         Assert.Equal(HttpStatusCode.Conflict, secondSetupResponse.StatusCode);
+
+        var setupAdminClient = CreateClientWithSessionCookie(setupResponse);
+        var setupLogs = await setupAdminClient.GetFromJsonAsync<PagedResponse<List<AuditLog>>>(
+            "/api/v1/AuditLog?PageNumber=1&PageSize=20",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(setupLogs);
+        Assert.Contains(setupLogs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.Setup_Completed)
+            && l.Username == "initialadmin"
+            && l.ActorUserId == session.Id
+            && l.Target == "initialadmin"
+            && l.TargetUserId == session.Id
+            && !l.Details.Contains(activeSetupToken!));
     }
 
     [Fact]
@@ -391,13 +408,160 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
     {
         await LoginFromAsync("203.0.113.99", "User", "user");
 
+        // Failed login must not write an audit entry
+        var badLogin = await LoginFromAsync("203.0.113.98", "User", "wrong-password");
+        Assert.Equal(HttpStatusCode.Unauthorized, badLogin.StatusCode);
+
         var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
 
-        var logsResponse = await adminClient.GetAsync("/api/v1/AuditLog?PageNumber=1&PageSize=50", TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.OK, logsResponse.StatusCode);
+        var createRes = await adminClient.PostAsJsonAsync(
+            "/api/v1/User",
+            new AddUserDto
+            {
+                Username = "audit.target",
+                Password = "Audit!Password1",
+                UserTypeId = (int)PrimaryKeys.UserTypes.User
+            },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Created, createRes.StatusCode);
+        var created = await createRes.Content.ReadFromJsonAsync<UserDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(created);
 
-        var filtersResponse = await adminClient.GetAsync("/api/v1/AuditLog/filters", TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.OK, filtersResponse.StatusCode);
+        var updateRes = await adminClient.PutAsJsonAsync(
+            $"/api/v1/User/{created.Id}",
+            new UpdateUserDto
+            {
+                Username = "audit.renamed",
+                UserTypeId = (int)PrimaryKeys.UserTypes.Admin,
+                IsActive = false
+            },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, updateRes.StatusCode);
+
+        var resetRes = await adminClient.PutAsJsonAsync(
+            $"/api/v1/User/{created.Id}/password",
+            new ResetPasswordDto { Password = "Reset!Password2" },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, resetRes.StatusCode);
+
+        var (userClient, _) = await LoginClientFromAsync("203.0.113.77", "User", "user");
+        var changePwRes = await userClient.PutAsJsonAsync(
+            "/api/v1/User/me/password",
+            new ChangePasswordDto { CurrentPassword = "user", Password = "Changed!Password3" },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, changePwRes.StatusCode);
+
+        var deleteRes = await adminClient.DeleteAsync(
+            $"/api/v1/User/{created.Id}",
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.NoContent, deleteRes.StatusCode);
+
+        // Recreate a different user reusing the old username; UserId search stays isolated by ID across renames & reuse.
+        var recreateRes = await adminClient.PostAsJsonAsync(
+            "/api/v1/User",
+            new AddUserDto
+            {
+                Username = "audit.target",
+                Password = "Audit!Password4",
+                UserTypeId = (int)PrimaryKeys.UserTypes.User
+            },
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.Created, recreateRes.StatusCode);
+        var recreated = await recreateRes.Content.ReadFromJsonAsync<UserDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(recreated);
+        Assert.NotEqual(created.Id, recreated.Id);
+
+        var logs = await adminClient.GetFromJsonAsync<PagedResponse<List<AuditLog>>>(
+            "/api/v1/AuditLog?PageNumber=1&PageSize=50",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(logs);
+
+        // Failed login IP never appears in the audit log
+        Assert.DoesNotContain(logs.Data, l => l.ClientIp == "203.0.113.98");
+
+        Assert.Contains(logs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.Login_Succeeded)
+            && l.Username == "User"
+            && l.ActorUserId == (int)PrimaryKeys.UserTypes.User
+            && l.ClientIp == "203.0.113.99");
+
+        Assert.Contains(logs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.User_Created)
+            && l.Username == "Admin"
+            && l.ActorUserId == (int)PrimaryKeys.UserTypes.Admin
+            && l.Target == "audit.target"
+            && l.TargetUserId == created.Id
+            && l.Details.Contains("role: User"));
+
+        Assert.Contains(logs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.User_Updated)
+            && l.Username == "Admin"
+            && l.ActorUserId == (int)PrimaryKeys.UserTypes.Admin
+            && l.Target == "audit.renamed"
+            && l.TargetUserId == created.Id
+            && l.Details.Contains("role: User → Admin")
+            && l.Details.Contains("isActive: true → false"));
+
+        Assert.Contains(logs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.Password_Reset)
+            && l.Username == "Admin"
+            && l.Target == "audit.renamed"
+            && l.TargetUserId == created.Id
+            && !l.Details.Contains("Reset!Password2"));
+
+        Assert.Contains(logs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.Password_Changed)
+            && l.Username == "User"
+            && l.ActorUserId == (int)PrimaryKeys.UserTypes.User
+            && l.Target == "User"
+            && l.TargetUserId == (int)PrimaryKeys.UserTypes.User
+            && !l.Details.Contains("Changed!Password3"));
+
+        Assert.Contains(logs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.User_Deleted)
+            && l.Username == "Admin"
+            && l.Target == "audit.renamed"
+            && l.TargetUserId == created.Id);
+
+        // SearchBy.Target (7) and SearchBy.Details (8)
+        var targetFiltered = await adminClient.GetFromJsonAsync<PagedResponse<List<AuditLog>>>(
+            $"/api/v1/AuditLog?PageNumber=1&PageSize=20&SearchBy={(int)AuditLogEnums.SearchBy.Target}&ValueStr=audit.renamed",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(targetFiltered);
+        Assert.True(targetFiltered.TotalRecords >= 3);
+
+        var detailsFiltered = await adminClient.GetFromJsonAsync<PagedResponse<List<AuditLog>>>(
+            $"/api/v1/AuditLog?PageNumber=1&PageSize=20&SearchBy={(int)AuditLogEnums.SearchBy.Details}&ValueStr=isActive",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(detailsFiltered);
+        Assert.Contains(detailsFiltered.Data, l => l.Description == nameof(AuditLogEnums.Description.User_Updated));
+
+        // SearchBy.UserId (9) links history across renames without leaking a later user's events under the reused name
+        var byOldUserId = await adminClient.GetFromJsonAsync<PagedResponse<List<AuditLog>>>(
+            $"/api/v1/AuditLog?PageNumber=1&PageSize=20&SearchBy={(int)AuditLogEnums.SearchBy.UserId}&ValueStr={created.Id}",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(byOldUserId);
+        Assert.Contains(byOldUserId.Data, l => l.Description == nameof(AuditLogEnums.Description.User_Created) && l.Target == "audit.target");
+        Assert.Contains(byOldUserId.Data, l => l.Description == nameof(AuditLogEnums.Description.User_Updated) && l.Target == "audit.renamed");
+        Assert.Contains(byOldUserId.Data, l => l.Description == nameof(AuditLogEnums.Description.User_Deleted) && l.Target == "audit.renamed");
+        Assert.DoesNotContain(byOldUserId.Data, l => l.TargetUserId == recreated.Id);
+
+        var invalidUserIdSearch = await adminClient.GetFromJsonAsync<PagedResponse<List<AuditLog>>>(
+            $"/api/v1/AuditLog?PageNumber=1&PageSize=20&SearchBy={(int)AuditLogEnums.SearchBy.UserId}&ValueStr=not-a-number",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(invalidUserIdSearch);
+        Assert.Equal(0, invalidUserIdSearch.TotalRecords);
+
+        var filters = await adminClient.GetFromJsonAsync<AuditLogSearchFiltersDto>(
+            "/api/v1/AuditLog/filters",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(filters);
+        Assert.True(filters.SearchBy.ContainsKey(nameof(AuditLogEnums.SearchBy.Target)));
+        Assert.True(filters.SearchBy.ContainsKey(nameof(AuditLogEnums.SearchBy.Details)));
+        Assert.True(filters.SearchBy.ContainsKey(nameof(AuditLogEnums.SearchBy.UserId)));
+        Assert.True(filters.ValuesStr.Description.ContainsKey(nameof(AuditLogEnums.Description.User_Updated)));
+        Assert.True(filters.ValuesStr.Description.ContainsKey(nameof(AuditLogEnums.Description.Webhook_Created)));
+        Assert.True(filters.ValuesStr.Description.ContainsKey(nameof(AuditLogEnums.Description.Retention_Policy_Created)));
     }
 
     [Fact]

@@ -63,12 +63,13 @@ Organizations deploying private Docker registries typically face two limitations
   * Interactive **Dry Run** previews plus a background scheduler supporting **Manual Only**, **Hourly**, **Daily**, **Weekly**, and **Monthly** intervals.
 
 * **Inbound Registry Events & Outbound Webhooks**:
-  * **Inbound Registry Webhook Receiver** (`POST /api/v1/Registry/events`): Ingests Docker Distribution notifications with optional constant-time `WebhookSecret` verification, records CLI `push` / `pull` / `delete` events with client IPs, and invalidates cached catalog/tags.
+  * **Inbound Registry Webhook Receiver** (`POST /api/v1/Registry/events`): Ingests Docker Distribution notifications with required constant-time `WebhookSecret` verification (the endpoint is disabled and returns `401` until a secret is configured), records CLI `push` / `pull` / `delete` events with client IPs, and invalidates cached catalog/tags.
   * **Outbound Webhook Notifications**: Delivers formatted notifications for **Slack** (Block Kit), **Discord** (rich embeds), and **Microsoft Teams** (Workflows Adaptive Cards) filtered by repository pattern and trigger (`Push`, `Delete`, `Retention`), with built-in test delivery status tracking.
 
 * **User, Service Account & Root Admin Governance**:
   * Dedicated human (`Admin`, `User`) and headless CI/CD (`Service`) accounts, with bootstrap **Root Admin (`Id == 1`) protection** blocking deletion, demotion, deactivation, or modification by secondary admins.
-  * High-iteration `PBKDF2-HMAC-SHA512` password hashing, strict password complexity + common/username blacklist enforcement, 15-minute JWTs with single-use hashed refresh token rotation, and IP brute-force lockouts.
+  * Two-step initial administrator onboarding protected by a **one-time setup token** printed to container logs on first boot.
+  * `220,000`-iteration `PBKDF2-HMAC-SHA512` password hashing, strict 8–64 character password complexity + **UK NCSC Top 100k** breached password blacklist, **ASP.NET Core `HttpOnly; SameSite=Strict` session cookies** with instant server-side revocation, and IP brute-force lockouts.
   * Unified dropdown filter bars across Users, Policies, Retention Policies, Webhooks, and Audit Logs, plus light/dark themes.
 
 * **Audit Logging**:
@@ -214,7 +215,14 @@ volumes:
   - ./certs/registry-auth.crt:/certs/registry-auth.crt:ro
 ```
 
-*(Optional — Recommended for real-time audit logs, cache invalidation, GC tracking, and Slack/Discord/Teams push alerts)*: Configure Docker Distribution's webhook notifications to forward events to MobyGuard:
+*(Optional — Recommended for real-time audit logs, cache invalidation, GC tracking, and Slack/Discord/Teams push alerts)*: Configure Docker Distribution's webhook notifications to forward events to MobyGuard.
+
+> [!IMPORTANT]
+> `POST /api/v1/Registry/events` is **disabled until `REGISTRY_WEBHOOK_SECRET` is set**. With no secret configured, MobyGuard logs a startup warning and the endpoint always returns `401 Unauthorized`. Generate a secret and set the same value in `.env` and the registry `config.yml`:
+>
+> ```bash
+> openssl rand -hex 32
+> ```
 
 ```yaml
 notifications:
@@ -223,14 +231,14 @@ notifications:
       url: http://mobyguard:5090/api/v1/Registry/events
       headers:
         X-Registry-Webhook-Secret:
-          - your_shared_webhook_secret
+          - <value of REGISTRY_WEBHOOK_SECRET>
       timeout: 2s
       threshold: 3
       backoff: 1s
 ```
 
 ### 2. Configure `compose.yml`
-Save the following configuration as `compose.yml` *(when running behind a reverse proxy on the same host, prefer binding `127.0.0.1:${API_PORT:-5090}:5090` so external callers cannot bypass proxy headers)*:
+Save the following configuration as `compose.yml` *(when running behind a reverse proxy on the same host, bind `127.0.0.1:${API_PORT:-5090}:5090` so external callers cannot bypass proxy headers)*:
 
 ```yaml
 services:
@@ -247,7 +255,7 @@ services:
       ConnectionStrings__DefaultConnection: ${SQLITE_CONN_STRING:-Data Source=/app/data/mobyguard.db}
       RegistryTokenOptions__RegistryUrl: ${REGISTRY_URL}
       RegistryTokenOptions__WebhookSecret: ${REGISTRY_WEBHOOK_SECRET:-}
-      JwtOptions__SecurityKey: ${JWT_SECURITY_KEY}
+      AllowedHosts: ${ALLOWED_HOSTS:-localhost}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5090/api/v1/health"]
       interval: 10s
@@ -266,11 +274,17 @@ networks:
     external: true
 ```
 
-### 3. Configure Environment Variables
+### 3. Configure Environment Variables & `appsettings.json`
 Create a `.env` file in the same directory (or copy from [`.env.example`](.env.example)):
 
 ```bash
 cat << 'EOF' > .env
+# Application Image Tag, Host Port & Allowed Hosts
+API_VERSION=latest
+API_PORT=5090
+ALLOWED_HOSTS=localhost
+CERTS_DIR=./certs
+
 # Database Connection String (SQLite)
 SQLITE_CONN_STRING=Data Source=/app/data/mobyguard.db
 
@@ -279,16 +293,44 @@ REGISTRY_URL=http://registry:5000
 
 # Optional shared secret for inbound Registry events (POST /api/v1/Registry/events)
 REGISTRY_WEBHOOK_SECRET=
-
-# Web UI Authentication (minimum 32 characters)
-JWT_SECURITY_KEY=generate_a_secure_random_32_character_security_key_here!
 EOF
 ```
 
+* **`ALLOWED_HOSTS`**: Semicolon-delimited hostnames allowed by ASP.NET Core (defaults to `localhost`; set to your domain such as `registry.example.com;localhost` in production).
 * **`SQLITE_CONN_STRING`**: Connection string used by MobyGuard for its embedded SQLite database (stored in the `sqlite-data` volume at `/app/data/mobyguard.db`).
 * **`REGISTRY_URL`**: URL of your Docker Registry or CNCF Distribution instance.
-* **`REGISTRY_WEBHOOK_SECRET`**: Optional shared secret validated by `POST /api/v1/Registry/events` (`X-Registry-Webhook-Secret` header or `Authorization: Bearer`).
-* **`JWT_SECURITY_KEY`**: Cryptographically secure random string with at least 32 characters (e.g., generated with `openssl rand -base64 32`).
+* **`REGISTRY_WEBHOOK_SECRET`**: Shared secret required by `POST /api/v1/Registry/events` (`X-Registry-Webhook-Secret` header or `Authorization: Bearer`). When empty, the events endpoint is disabled and always returns `401 Unauthorized`. Generate one with `openssl rand -hex 32`.
+
+For standalone or custom deployments, MobyGuard's [`appsettings.example.json`](MobyGuard/appsettings.example.json) template is structured as follows:
+
+```json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Warning",
+      "MobyGuard": "Information"
+    }
+  },
+  "RegistryTokenOptions": {
+    "Issuer": "mobyguard-token-issuer",
+    "Service": "registry",
+    "CertificatePath": "/app/certs/registry-auth.crt",
+    "PrivateKeyPath": "/app/certs/registry-auth.key",
+    "TokenExpiryMinutes": 15,
+    "RegistryUrl": "http://registry:5000",
+    "WebhookSecret": ""
+  },
+  "ConnectionStrings": {
+    "DefaultConnection": "Data Source=data/mobyguard.db"
+  },
+  "HostingOptions": {
+    "Scheme": "http",
+    "Ip": "0.0.0.0",
+    "Port": 5090
+  },
+  "AllowedHosts": "*"
+}
+```
 
 ### 4. Deploy the Services
 Ensure the shared Docker bridge network exists and start the containers:
@@ -299,8 +341,71 @@ docker compose up -d
 ```
 
 ### 5. Initialize the Administrator Account
-* Navigate to `http://localhost:5090` in your web browser.
-* Complete the initial root administrator setup form (`Id == 1`).
+1. Retrieve the one-time setup token printed to the container logs on first startup:
+   ```bash
+   docker compose logs mobyguard
+   ```
+2. Navigate to `http://localhost:5090` (or your HTTPS reverse-proxy URL) in your browser.
+3. Paste the **One-Time Setup Token** to unlock setup, then create the primary Root Administrator account (`Id == 1`).
+
+---
+
+## Reverse Proxy & TLS Termination (Recommended)
+
+Because `docker login` transmits credentials using HTTP Basic authentication (`GET /api/v1/Token`) and the web dashboard uses `HttpOnly; SameSite=Strict` session cookies, **running MobyGuard and Docker Registry behind a TLS-terminating reverse proxy over HTTPS is strongly recommended in production**.
+
+When placing MobyGuard behind a reverse proxy on the same host, bind MobyGuard's port to loopback (`127.0.0.1:5090:5090`) or keep it on an internal Docker network so external clients must pass through the proxy.
+
+### Option A: Caddy (`Caddyfile`) — Single Domain for Registry + MobyGuard
+Caddy provisions and renews Let's Encrypt TLS certificates automatically. This example routes `/v2/*` image traffic to Docker Registry and all `/api/*` + Web UI traffic to MobyGuard on a single domain:
+
+```caddyfile
+registry.example.com {
+    # Docker Registry v2/v3 OCI API
+    handle /v2* {
+        reverse_proxy registry:5000
+    }
+
+    # MobyGuard Token Auth (/api/v1/Token) & Web Dashboard
+    handle {
+        reverse_proxy mobyguard:5090
+    }
+}
+```
+
+### Option B: Nginx
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name registry.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/registry.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/registry.example.com/privkey.pem;
+
+    # Allow large container layer uploads
+    client_max_body_size 0;
+    chunked_transfer_encoding on;
+
+    # Docker Registry v2/v3 OCI endpoints
+    location /v2/ {
+        proxy_pass                          http://registry:5000;
+        proxy_set_header  Host              $http_host;
+        proxy_set_header  X-Real-IP         $remote_addr;
+        proxy_set_header  X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header  X-Forwarded-Proto $scheme;
+        proxy_read_timeout                  900;
+    }
+
+    # MobyGuard Control Plane API & Web Dashboard
+    location / {
+        proxy_pass                          http://mobyguard:5090;
+        proxy_set_header  Host              $http_host;
+        proxy_set_header  X-Real-IP         $remote_addr;
+        proxy_set_header  X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header  X-Forwarded-Proto $scheme;
+    }
+}
+```
 
 ---
 

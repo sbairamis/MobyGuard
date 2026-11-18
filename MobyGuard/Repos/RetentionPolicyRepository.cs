@@ -15,6 +15,7 @@ public class RetentionPolicyRepository(
     DatabaseContext context,
     RegistryRepository registryRepository,
     OutboundWebhookDispatcher webhookDispatcher,
+    AuditService audit,
     ILogger<RetentionPolicyRepository> logger)
 {
     public async Task<Result<List<RetentionPolicyDto>>> GetAll()
@@ -89,6 +90,13 @@ public class RetentionPolicyRepository(
             };
 
             context.RetentionPolicies.Add(entity);
+
+            audit.Record(
+                AuditLogEnums.Description.Retention_Policy_Created,
+                target: entity.Name,
+                repository: entity.RepositoryPattern,
+                details: DescribePolicy(entity));
+
             await context.SaveChangesAsync();
 
             return Result<RetentionPolicyDto>.Success(MapToDto(entity));
@@ -121,6 +129,15 @@ public class RetentionPolicyRepository(
                 return Result.Failure(RepositoryStatus.Conflict, ResponseMessages.RetentionPolicyExists);
             }
 
+            var changeDetails = AuditService.Diff(
+                ("name", entity.Name, normalizedName),
+                ("pattern", entity.RepositoryPattern, normalizedPattern),
+                ("keepLast", entity.KeepLastCount, dto.KeepLastCount),
+                ("maxAgeDays", entity.MaxAgeDays, dto.MaxAgeDays),
+                ("protected", entity.ProtectedTagPatterns, normalizedProtected),
+                ("intervalHours", entity.RunIntervalHours, dto.RunIntervalHours),
+                ("enabled", entity.IsEnabled, dto.IsEnabled));
+
             entity.Name = normalizedName;
             entity.RepositoryPattern = normalizedPattern;
             entity.KeepLastCount = dto.KeepLastCount;
@@ -129,6 +146,15 @@ public class RetentionPolicyRepository(
             entity.IsEnabled = dto.IsEnabled;
             entity.RunIntervalHours = dto.RunIntervalHours;
             entity.UpdatedAt = DateTime.UtcNow;
+
+            if (changeDetails.Length > 0)
+            {
+                audit.Record(
+                    AuditLogEnums.Description.Retention_Policy_Updated,
+                    target: entity.Name,
+                    repository: entity.RepositoryPattern,
+                    details: changeDetails);
+            }
 
             await context.SaveChangesAsync();
 
@@ -152,6 +178,13 @@ public class RetentionPolicyRepository(
             }
 
             context.RetentionPolicies.Remove(entity);
+
+            audit.Record(
+                AuditLogEnums.Description.Retention_Policy_Deleted,
+                target: entity.Name,
+                repository: entity.RepositoryPattern,
+                details: DescribePolicy(entity));
+
             await context.SaveChangesAsync();
 
             return Result.Success();
@@ -372,12 +405,17 @@ public class RetentionPolicyRepository(
                 policy.LastDeletedTagsCount = executionResult.DeletedTagsCount;
                 policy.UpdatedAt = nowUtc;
 
-                context.AuditLogs.Add(new AuditLog(
-                    username: caller.Username,
+                audit.Record(
+                    AuditLogEnums.Description.Retention_Policy_Executed,
+                    target: policy.Name,
                     repository: policy.RepositoryPattern,
                     actions: $"deleted:{executionResult.DeletedTagsCount}",
-                    description: nameof(AuditLogEnums.Description.Retention_Policy_Executed),
-                    clientIp: clientAddress?.ToString() ?? string.Empty));
+                    details: AuditService.Describe(
+                        ("matchedRepositories", executionResult.MatchedRepositoriesCount),
+                        ("deletedTags", executionResult.DeletedTagsCount),
+                        ("deletedDigests", executionResult.DeletedDigestsCount)),
+                    actor: new AuditActor(caller.Id, caller.Username),
+                    clientAddress: clientAddress);
 
                 await context.SaveChangesAsync();
 
@@ -396,6 +434,13 @@ public class RetentionPolicyRepository(
             return Result<RetentionExecutionResultDto>.Failure(RepositoryStatus.InternalServerError, ResponseMessages.InternalServerError);
         }
     }
+
+    private static string DescribePolicy(RetentionPolicy policy) => AuditService.Describe(
+        ("keepLast", policy.KeepLastCount),
+        ("maxAgeDays", policy.MaxAgeDays),
+        ("protected", policy.ProtectedTagPatterns),
+        ("intervalHours", policy.RunIntervalHours),
+        ("enabled", policy.IsEnabled));
 
     private static string? ValidateDto(
         SaveRetentionPolicyDto dto,

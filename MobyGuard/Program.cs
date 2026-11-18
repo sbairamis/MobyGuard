@@ -28,8 +28,7 @@ builder.Services.AddValidatedOptions<HostingOptions>();
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor
-                             | ForwardedHeaders.XForwardedProto
-                             | ForwardedHeaders.XForwardedPrefix;
+                             | ForwardedHeaders.XForwardedProto;
     options.ForwardLimit = 1;
 
     options.KnownIPNetworks.Clear();
@@ -66,12 +65,14 @@ builder.Services.AddHttpClient("OutboundWebhook", client =>
     client.Timeout = TimeSpan.FromSeconds(10);
 });
 
+builder.Services.AddScoped<AuditService>();
 builder.Services.AddScoped<AuditLogRepository>();
 builder.Services.AddScoped<OutboundWebhookDispatcher>();
 builder.Services.AddScoped<RegistryRepository>();
 builder.Services.AddScoped<RepositoryPermissionRepository>();
 builder.Services.AddScoped<RetentionPolicyRepository>();
-builder.Services.AddHostedService<RetentionPolicySchedulerService>();
+builder.Services.AddSingleton<RetentionPolicySchedulerService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<RetentionPolicySchedulerService>());
 builder.Services.AddScoped<TokenRepository>();
 builder.Services.AddScoped<UserRepository>();
 builder.Services.AddScoped<UserTypeRepository>();
@@ -136,17 +137,6 @@ builder.Services.AddAuthorization();
 
 builder.Services.AddHttpContextAccessor();
 
-builder.Services.AddTransient<IUriService>(options =>
-{
-    var accessor = options.GetRequiredService<IHttpContextAccessor>();
-
-    var request = accessor?.HttpContext?.Request;
-
-    var uri = string.Concat(request?.Scheme, "://", request?.Host.ToUriComponent(), request?.PathBase.ToUriComponent());
-
-    return new UriService(uri);
-});
-
 builder.Services.AddDbContext<DatabaseContext>(options => options.UseSqlite(connectionString));
 
 builder.Services.AddProblemDetails();
@@ -156,6 +146,13 @@ var app = builder.Build();
 app.Services.GetRequiredService<IStartupValidator>().Validate();
 
 app.Services.GetRequiredService<RegistryTokenSigner>();
+
+var registryTokenOptions = app.Services.GetRequiredService<IOptions<RegistryTokenOptions>>().Value;
+if (string.IsNullOrWhiteSpace(registryTokenOptions.WebhookSecret))
+{
+    app.Logger.LogWarning(
+        "RegistryTokenOptions:WebhookSecret is not configured. The /api/v1/Registry/events endpoint is disabled until a secret is set.");
+}
 
 app.UseForwardedHeaders();
 
@@ -171,20 +168,15 @@ using (var scope = app.Services.CreateScope())
 
     var dbContext = services.GetRequiredService<DatabaseContext>();
 
-    var activeConnectionString = dbContext.Database.GetConnectionString();
-
-    EnsureSqliteDirectoryExists(activeConnectionString);
+    var dataSource = new SqliteConnectionStringBuilder(dbContext.Database.GetConnectionString()).DataSource;
+    if (Path.GetDirectoryName(Path.GetFullPath(dataSource)) is { Length: > 0 } directory)
+    {
+        Directory.CreateDirectory(directory);
+    }
 
     dbContext.Database.Migrate();
 
-    if (IsFileBasedSqlite(activeConnectionString))
-    {
-        dbContext.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
-    }
-
-    var retentionCutoff = DateTime.UtcNow.AddDays(-Variables.AuditLogRetentionDays);
-    
-    dbContext.AuditLogs.Where(log => log.CreatedAt < retentionCutoff).ExecuteDelete();
+    dbContext.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
 
     DbInitializer.Initialize(dbContext);
 
@@ -214,38 +206,3 @@ app.MapFallbackToFile("index.html");
 var hostingOptions = app.Services.GetRequiredService<IOptions<HostingOptions>>().Value;
 
 app.Run($"{hostingOptions.Scheme}://{hostingOptions.Ip}:{hostingOptions.Port}");
-
-public partial class Program
-{
-    private static bool IsFileBasedSqlite(string? connectionString)
-    {
-        if (string.IsNullOrWhiteSpace(connectionString))
-        {
-            return false;
-        }
-
-        var sqliteBuilder = new SqliteConnectionStringBuilder(connectionString);
-
-        return sqliteBuilder.Mode != SqliteOpenMode.Memory
-               && !string.IsNullOrWhiteSpace(sqliteBuilder.DataSource)
-               && !string.Equals(sqliteBuilder.DataSource, ":memory:", StringComparison.OrdinalIgnoreCase)
-               && !sqliteBuilder.DataSource.StartsWith("file:", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static void EnsureSqliteDirectoryExists(string? connectionString)
-    {
-        if (!IsFileBasedSqlite(connectionString))
-        {
-            return;
-        }
-
-        var sqliteBuilder = new SqliteConnectionStringBuilder(connectionString);
-        var fullPath = Path.GetFullPath(sqliteBuilder.DataSource);
-        var directory = Path.GetDirectoryName(fullPath);
-
-        if (!string.IsNullOrEmpty(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-    }
-}

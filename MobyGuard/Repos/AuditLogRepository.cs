@@ -4,6 +4,7 @@ using MobyGuard.Database.Context;
 using MobyGuard.Database.Dtos.AuditLogDtos;
 using MobyGuard.Database.Models;
 using MobyGuard.Enumerators;
+using MobyGuard.Global;
 using MobyGuard.Pagination;
 
 using static MobyGuard.Enumerators.AuditLogEnums;
@@ -11,7 +12,7 @@ using static MobyGuard.Helpers.EnumsHelper;
 
 namespace MobyGuard.Repos;
 
-public class AuditLogRepository(DatabaseContext context, IUriService uriService, ILogger<AuditLogRepository> logger)
+public class AuditLogRepository(DatabaseContext context, ILogger<AuditLogRepository> logger)
 {
     public Task<Result<AuditLogSearchFiltersDto>> GetSearchFilters()
     {
@@ -36,7 +37,7 @@ public class AuditLogRepository(DatabaseContext context, IUriService uriService,
         }
     }
 
-    public async Task<Result<PagedResponse<List<AuditLog>>>> Search(LogsSearchRequestDto logsSearchRequestDto, PaginationFilter filter, string route)
+    public async Task<Result<PagedResponse<List<AuditLog>>>> Search(LogsSearchRequestDto logsSearchRequestDto, PaginationFilter filter)
     {
         try
         {
@@ -52,7 +53,7 @@ public class AuditLogRepository(DatabaseContext context, IUriService uriService,
                 .Take(validFilter.PageSize)
                 .ToListAsync();
 
-            var pagedResponse = PaginationHelper.CreatePagedResponse(results, validFilter, totalRecords, uriService, route);
+            var pagedResponse = PaginationHelper.CreatePagedResponse(results, validFilter, totalRecords);
 
             return Result<PagedResponse<List<AuditLog>>>.Success(pagedResponse);
         }
@@ -70,6 +71,13 @@ public class AuditLogRepository(DatabaseContext context, IUriService uriService,
 
         var baseQuery = context.AuditLogs.AsNoTracking();
 
+        if (logsSearchRequestDto.SearchBy == SearchBy.UserId)
+        {
+            return int.TryParse(value, out var userId)
+                ? baseQuery.Where(a => a.ActorUserId == userId || a.TargetUserId == userId)
+                : baseQuery.Where(_ => false);
+        }
+
         return logsSearchRequestDto.SearchBy switch
         {
             SearchBy.Username    => baseQuery.Where(a => a.Username.ToLower().Contains(value)),
@@ -78,7 +86,18 @@ public class AuditLogRepository(DatabaseContext context, IUriService uriService,
             SearchBy.Description => baseQuery.Where(a => a.Description.ToLower().Contains(value)),
             SearchBy.ClientIp    => baseQuery.Where(a => a.ClientIp.ToLower().Contains(value)),
             SearchBy.Timestamp   => baseQuery.Where(a => a.CreatedAt >= logsSearchRequestDto.FromDate && a.CreatedAt <= logsSearchRequestDto.ToDate),
+            SearchBy.Target      => baseQuery.Where(a => a.Target.ToLower().Contains(value)),
+            SearchBy.Details     => baseQuery.Where(a => a.Details.ToLower().Contains(value)),
             _                    => baseQuery
         };
+    }
+
+    public async Task<int> PurgeExpiredLogsAsync(CancellationToken cancellationToken = default)
+    {
+        var retentionCutoff = DateTime.UtcNow.AddDays(-Variables.AuditLogRetentionDays);
+
+        return await context.AuditLogs
+            .Where(log => log.CreatedAt < retentionCutoff)
+            .ExecuteDeleteAsync(cancellationToken);
     }
 }
