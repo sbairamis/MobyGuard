@@ -6,67 +6,50 @@ namespace MobyGuard.Helpers;
 public static class PasswordPolicyValidator
 {
     public const int MinLength = 8;
-    public const int MaxLength = 128;
+    public const int MaxLength = 64;
 
-    private static readonly FrozenSet<string> BlacklistedPasswords = new[]
+    private static readonly FrozenSet<string> BlacklistedPasswords = LoadBlacklistedPasswords();
+
+    private static FrozenSet<string> LoadBlacklistedPasswords()
     {
-        "password",
-        "password1",
-        "password1!",
-        "password123",
-        "password123!",
-        "password@123",
-        "p@ssw0rd",
-        "p@ssw0rd!",
-        "p@ssword123",
-        "p@ssword123!",
-        "passw0rd!",
-        "passw0rd123!",
-        "admin",
-        "admin123",
-        "admin123!",
-        "admin@123",
-        "administrator1!",
-        "root123!",
-        "mobyguard",
-        "mobyguard1!",
-        "mobyguard123",
-        "mobyguard123!",
-        "docker123!",
-        "registry123!",
-        "welcome1!",
-        "welcome123",
-        "welcome123!",
-        "qwerty123",
-        "qwerty123!",
-        "qwerty@123",
-        "letmein1!",
-        "letmein123!",
-        "changeme1!",
-        "changeme123!",
-        "abcd1234!",
-        "12345678",
-        "12345678a!",
-        "12345678aa!",
-        "iloveyou1!",
-        "sunshine1!",
-        "princess1!",
-        "football1!",
-        "baseball1!",
-        "trustno1!",
-        "dragon123!",
-        "master123!",
-        "monkey123!",
-        "shadow123!",
-        "superman1!",
-        "michael123!",
-        "mustang123!",
-        "summer2025!",
-        "summer2026!",
-        "winter2025!",
-        "winter2026!",
-        "company123!"
-    }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+        var path = Path.Combine(AppContext.BaseDirectory, "Resources", "PwnedPasswordsTop100k.txt");
+
+        if (!File.Exists(path))
+        {
+            return FrozenSet<string>.Empty;
+        }
+
+        return File.ReadLines(path)
+            .Select(line => line.Trim())
+            .Where(line => !string.IsNullOrEmpty(line))
+            .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool IsBlacklisted(string trimmedPassword)
+    {
+        if (BlacklistedPasswords.Contains(trimmedPassword))
+        {
+            return true;
+        }
+
+        var end = trimmedPassword.Length;
+        while (end > 0 && !char.IsAsciiLetter(trimmedPassword[end - 1]))
+        {
+            end--;
+        }
+
+        if (end >= 4)
+        {
+            var rootWord = trimmedPassword[..end];
+            if (BlacklistedPasswords.Contains(rootWord)
+                || string.Equals(rootWord, "mobyguard", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     public static (bool IsValid, string ErrorMessage) Validate(string? password, string? username = null)
     {
@@ -75,9 +58,14 @@ public static class PasswordPolicyValidator
             return (false, ResponseMessages.PasswordPolicyViolation);
         }
 
+        if (password.Length < MinLength || password.Length > MaxLength)
+        {
+            return (false, ResponseMessages.PasswordPolicyViolation);
+        }
+
         var trimmedPassword = password.Trim();
 
-        if (BlacklistedPasswords.Contains(trimmedPassword))
+        if (IsBlacklisted(trimmedPassword))
         {
             return (false, ResponseMessages.PasswordBlacklisted);
         }
@@ -93,11 +81,6 @@ public static class PasswordPolicyValidator
             {
                 return (false, ResponseMessages.PasswordBlacklisted);
             }
-        }
-
-        if (password.Length < MinLength || password.Length > MaxLength)
-        {
-            return (false, ResponseMessages.PasswordPolicyViolation);
         }
 
         var hasUpper = false;

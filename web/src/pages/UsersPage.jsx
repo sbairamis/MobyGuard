@@ -353,7 +353,7 @@ export default function UsersPage({ user: currentUser, notify }) {
                   placeholder="Enter new password…"
                 />
                 <span className="muted" style={{ fontSize: 11.5 }}>
-                  Must be 8–128 characters with uppercase, lowercase, number, and symbol.
+                  Must be 8–64 characters with uppercase, lowercase, number, and symbol.
                 </span>
               </label>
             ) : (
@@ -394,7 +394,7 @@ export default function UsersPage({ user: currentUser, notify }) {
                       onChange={(e) => setPassword(e.target.value)}
                     />
                     <span className="muted" style={{ fontSize: 11.5 }}>
-                      Must be 8–128 characters with uppercase, lowercase, number, and symbol.
+                      Must be 8–64 characters with uppercase, lowercase, number, and symbol.
                     </span>
                   </label>
                 )}

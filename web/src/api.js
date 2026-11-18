@@ -14,7 +14,7 @@ const ERROR_MESSAGES = {
   _cannotChangeOwnTypeOrStatus: 'You cannot demote or deactivate your own admin account.',
   _cannotModifyRootAdmin: 'The initial root admin account cannot be deleted, disabled, demoted, or modified by another admin.',
   _invalidCurrentPassword: 'Your current password is incorrect.',
-  _passwordPolicyViolation: 'Password must be 8–128 characters and include uppercase, lowercase, number, and symbol (no spaces).',
+  _passwordPolicyViolation: 'Password must be 8–64 characters and include uppercase, lowercase, number, and symbol (no spaces).',
   _passwordBlacklisted: 'This password is on the common password blacklist or contains your username. Choose a stronger password.',
   _userTypeNotFound: 'Role / UserType not found.',
   _userTypeAlreadyExists: 'That role already exists.',

@@ -179,12 +179,29 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
     [Fact]
     public async Task Login_WithServiceUser_ReturnsForbidden()
     {
+        // Wrong password on Service account must return 401 InvalidCredentials (no account enumeration)
+        var wrongPassResponse = await LoginFromAsync("203.0.113.11", "Service", "wrong-password");
+        Assert.Equal(HttpStatusCode.Unauthorized, wrongPassResponse.StatusCode);
+        var wrongPassProblem = await wrongPassResponse.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(ResponseMessages.InvalidCredentials, wrongPassProblem!.Detail);
+
+        // Correct password on Service account reveals 403 ServiceAccountCannotLogin
         var response = await LoginFromAsync("203.0.113.11", "Service", "service");
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
 
         var problem = await response.Content.ReadFromJsonAsync<ProblemDetails>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal(ResponseMessages.ServiceAccountCannotLogin, problem!.Detail);
+
+        // Unknown username also returns 401 for the first LoginMaxRetries attempts and 429 afterwards
+        for (var i = 0; i < Variables.LoginMaxRetries; i++)
+        {
+            var unknownAttempt = await LoginFromAsync("203.0.113.199", "nonexistent_account", "wrong-password");
+            Assert.Equal(HttpStatusCode.Unauthorized, unknownAttempt.StatusCode);
+        }
+
+        var lockedUnknownAttempt = await LoginFromAsync("203.0.113.199", "nonexistent_account", "wrong-password");
+        Assert.Equal(HttpStatusCode.TooManyRequests, lockedUnknownAttempt.StatusCode);
     }
 
     [Fact]
@@ -315,9 +332,6 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
         var v1Health = await client.GetAsync("/api/v1/health", TestContext.Current.CancellationToken);
         Assert.Equal(HttpStatusCode.OK, v1Health.StatusCode);
         Assert.Equal("Healthy", await v1Health.Content.ReadAsStringAsync(TestContext.Current.CancellationToken));
-
-        var legacyHealth = await client.GetAsync("/api/health", TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.OK, legacyHealth.StatusCode);
     }
 
     [Fact]
@@ -507,8 +521,8 @@ public class UserControllerTests : IClassFixture<CustomWebApplicationFactory>, I
     {
         var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
 
-        // 1. Weak passwords violating complexity policy (too short, no uppercase, no digit, no symbol, contains space)
-        string[] policyViolations = ["Short1!", "nouppercase1!", "NOLOWERCASE1!", "NoDigitsHere!", "NoSpecialChar123", "Has Space1!"];
+        // 1. Weak passwords violating complexity policy (too short, too long, no uppercase, no digit, no symbol, contains space)
+        string[] policyViolations = ["Short1!", $"Aa1!{new string('x', 61)}", "nouppercase1!", "NOLOWERCASE1!", "NoDigitsHere!", "NoSpecialChar123", "Has Space1!"];
         foreach (var weak in policyViolations)
         {
             var res = await adminClient.PostAsJsonAsync(

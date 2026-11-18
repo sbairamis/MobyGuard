@@ -32,6 +32,7 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="certs\**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Resources\PwnedPasswordsTop100k.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

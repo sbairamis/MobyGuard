@@ -117,7 +117,7 @@ export default function ProfilePage({ notify }) {
                 onChange={(e) => setNewPassword(e.target.value)}
               />
               <span className="muted" style={{ fontSize: 11.5 }}>
-                Must be 8–128 characters with uppercase, lowercase, number, and symbol (not blacklisted).
+                Must be 8–64 characters with uppercase, lowercase, number, and symbol (not blacklisted).
               </span>
             </label>
 
