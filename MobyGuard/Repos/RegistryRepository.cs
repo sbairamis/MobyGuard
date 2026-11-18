@@ -28,6 +28,7 @@ public class RegistryRepository(
     AuditService audit,
     ILogger<RegistryRepository> logger)
 {
+    internal const string InternalRegistryActor = "mobyguard-ui";
     private const string CatalogCacheKey = "registry:catalog:repositories";
     private static readonly TimeSpan CatalogCacheDuration = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan TagsCacheDuration = TimeSpan.FromSeconds(15);
@@ -79,7 +80,7 @@ public class RegistryRepository(
                 {
                     if (forceRefresh || !cache.TryGetValue(CatalogCacheKey, out allRepoNames) || allRepoNames is null)
                     {
-                        using var client = CreateRegistryClient("mobyguard-ui", [
+                        using var client = CreateRegistryClient([
                             new RegistryAccessEntryDto
                             {
                                 Type = "registry",
@@ -217,7 +218,7 @@ public class RegistryRepository(
 
             if (!cache.TryGetValue(tagsCacheKey, out List<string>? tags) || tags is null)
             {
-                using var client = CreateRegistryClient(user.Username, [
+                using var client = CreateRegistryClient([
                     new RegistryAccessEntryDto
                     {
                         Type = "repository",
@@ -330,7 +331,7 @@ public class RegistryRepository(
                 return Result<RegistryManifestDto>.Failure(RepositoryStatus.Forbidden, ResponseMessages.RegistryRepositoryAccessDenied);
             }
 
-            using var client = CreateRegistryClient(user.Username, [
+            using var client = CreateRegistryClient([
                 new RegistryAccessEntryDto
                 {
                     Type = "repository",
@@ -511,7 +512,7 @@ public class RegistryRepository(
                 return Result.Failure(RepositoryStatus.Forbidden, ResponseMessages.RegistryRepositoryAccessDenied);
             }
 
-            using var client = CreateRegistryClient(user.Username, [
+            using var client = CreateRegistryClient([
                 new RegistryAccessEntryDto
                 {
                     Type = "repository",
@@ -611,7 +612,7 @@ public class RegistryRepository(
 
             var actorNames = envelope.Events
                 .Select(e => e.Actor?.Name?.Trim())
-                .Where(name => !string.IsNullOrWhiteSpace(name) && !string.Equals(name, "mobyguard-ui", StringComparison.OrdinalIgnoreCase))
+                .Where(name => !string.IsNullOrWhiteSpace(name) && !string.Equals(name, InternalRegistryActor, StringComparison.OrdinalIgnoreCase))
                 .Select(name => name!.ToLowerInvariant())
                 .Distinct()
                 .ToList();
@@ -642,7 +643,7 @@ public class RegistryRepository(
                 }
 
                 var actorName = ev.Actor?.Name?.Trim();
-                if (string.Equals(actorName, "mobyguard-ui", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(actorName, InternalRegistryActor, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -921,9 +922,9 @@ public class RegistryRepository(
         }
     }
 
-    private HttpClient CreateRegistryClient(string subject, List<RegistryAccessEntryDto> accessEntries)
+    private HttpClient CreateRegistryClient(List<RegistryAccessEntryDto> accessEntries)
     {
-        var (jwt, _, _) = tokenSigner.CreateToken(subject, _options.Service, accessEntries);
+        var (jwt, _, _) = tokenSigner.CreateToken(InternalRegistryActor, _options.Service, accessEntries);
         var client = httpClientFactory.CreateClient("DockerRegistry");
         client.BaseAddress = new Uri(_options.RegistryUrl.TrimEnd('/'));
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", jwt);

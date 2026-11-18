@@ -509,4 +509,94 @@ public class RegistryControllerTests : IClassFixture<CustomWebApplicationFactory
         Assert.NotNull(statusAfterAck.LastAcknowledgedAt);
         Assert.Equal("Admin", statusAfterAck.LastAcknowledgedBy);
     }
+
+    [Fact]
+    public async Task InternalRegistryCalls_AuthenticateAsMobyGuardUi_AndWebhookIgnoresPullAndDeleteFromMobyGuardUi()
+    {
+        var adminClient = await _factory.CreateAuthenticatedClientAsync(PrimaryKeys.UserTypes.Admin);
+
+        await adminClient.GetAsync("/api/v1/Registry/repositories?refresh=true", TestContext.Current.CancellationToken);
+        await adminClient.GetAsync("/api/v1/Registry/tags?repositoryName=team-a/demo-app&refresh=true", TestContext.Current.CancellationToken);
+        await adminClient.GetAsync("/api/v1/Registry/manifest?repositoryName=team-a/demo-app&reference=v1.0.0", TestContext.Current.CancellationToken);
+        await adminClient.DeleteAsync("/api/v1/Registry/manifest?repositoryName=team-a/demo-app&reference=v1.0.0", TestContext.Current.CancellationToken);
+
+        Assert.NotEmpty(_factory.RegistryHandler.CapturedTokenSubjects);
+        Assert.All(_factory.RegistryHandler.CapturedTokenSubjects, sub =>
+            Assert.Equal("mobyguard-ui", sub));
+
+        // Simulate Registry echoing back both a UI pull and a UI delete under actor "mobyguard-ui",
+        // plus one genuine external CLI pull under actor "User".
+        var webhookClient = _factory.CreateClient();
+        webhookClient.DefaultRequestHeaders.Add("X-Registry-Webhook-Secret", CustomWebApplicationFactory.WebhookSecret);
+
+        var envelope = new RegistryEventEnvelopeDto
+        {
+            Events =
+            [
+                new RegistryEventItemDto
+                {
+                    Id = "evt-ui-pull",
+                    Action = "pull",
+                    Target = new RegistryEventTargetDto
+                    {
+                        MediaType = "application/vnd.docker.distribution.manifest.v2+json",
+                        Repository = "team-a/demo-app",
+                        Tag = "v1.0.0"
+                    },
+                    Request = new RegistryEventRequestDto { Addr = "172.24.0.2:40000" },
+                    Actor = new RegistryEventActorDto { Name = "mobyguard-ui" }
+                },
+                new RegistryEventItemDto
+                {
+                    Id = "evt-ui-delete",
+                    Action = "delete",
+                    Target = new RegistryEventTargetDto
+                    {
+                        MediaType = "application/vnd.docker.distribution.manifest.v2+json",
+                        Repository = "team-a/demo-app",
+                        Tag = "v1.0.0"
+                    },
+                    Request = new RegistryEventRequestDto { Addr = "172.24.0.2:40001" },
+                    Actor = new RegistryEventActorDto { Name = "mobyguard-ui" }
+                },
+                new RegistryEventItemDto
+                {
+                    Id = "evt-cli-pull",
+                    Action = "pull",
+                    Target = new RegistryEventTargetDto
+                    {
+                        MediaType = "application/vnd.oci.image.manifest.v1+json",
+                        Repository = "team-a/demo-app",
+                        Tag = "v2.0.0"
+                    },
+                    Request = new RegistryEventRequestDto { Addr = "198.51.100.77:55555" },
+                    Actor = new RegistryEventActorDto { Name = "User" }
+                }
+            ]
+        };
+
+        var webhookRes = await webhookClient.PostAsJsonAsync(
+            "/api/v1/Registry/events",
+            envelope,
+            TestContext.Current.CancellationToken);
+        Assert.Equal(HttpStatusCode.OK, webhookRes.StatusCode);
+
+        var body = await webhookRes.Content.ReadFromJsonAsync<RegistryWebhookResultDto>(cancellationToken: TestContext.Current.CancellationToken);
+        Assert.NotNull(body);
+        Assert.Equal(1, body.ProcessedEvents);
+
+        var auditLogs = await adminClient.GetFromJsonAsync<PagedResponse<List<AuditLog>>>(
+            "/api/v1/AuditLog?PageNumber=1&PageSize=50",
+            TestContext.Current.CancellationToken);
+        Assert.NotNull(auditLogs);
+        Assert.DoesNotContain(auditLogs.Data, l => l.Username == "mobyguard-ui");
+        Assert.DoesNotContain(auditLogs.Data, l => l.ClientIp == "172.24.0.2");
+        Assert.Single(auditLogs.Data, l => l.Description == nameof(AuditLogEnums.Description.Manifest_Deleted));
+        Assert.Contains(auditLogs.Data, l =>
+            l.Description == nameof(AuditLogEnums.Description.Manifest_Pulled)
+            && l.Username == "User"
+            && l.ActorUserId == (int)PrimaryKeys.UserTypes.User
+            && l.Repository == "team-a/demo-app:v2.0.0"
+            && l.ClientIp == "198.51.100.77");
+    }
 }

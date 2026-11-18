@@ -224,6 +224,9 @@ public class RetentionPolicyTests : IClassFixture<CustomWebApplicationFactory>, 
         Assert.Equal(2, liveReport.DeletedTagsCount);
         Assert.Equal(2, liveReport.DeletedDigestsCount);
         Assert.Equal(1, liveReport.SkippedSharedDigestTagsCount);
+        Assert.NotEmpty(_factory.RegistryHandler.CapturedTokenSubjects);
+        Assert.All(_factory.RegistryHandler.CapturedTokenSubjects, sub =>
+            Assert.Equal("mobyguard-ui", sub));
 
         var tagsAfterLiveRun = await adminClient.GetFromJsonAsync<RegistryRepositoryTagsDto>(
             "/api/v1/Registry/tags?repositoryName=team-a/demo-app&refresh=true",

@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
+using Microsoft.IdentityModel.Tokens;
 
 namespace Tests;
 
@@ -22,6 +24,7 @@ public class FakeDockerRegistryHandler : HttpMessageHandler
 
     public int CatalogRequestCount { get; private set; }
     public int TagsRequestCount { get; private set; }
+    public List<string> CapturedTokenSubjects { get; } = [];
 
     public void Reset()
     {
@@ -32,6 +35,7 @@ public class FakeDockerRegistryHandler : HttpMessageHandler
             _customDemoTagMeta = new Dictionary<string, (string Digest, string ConfigDigest, string CreatedIso)>(StringComparer.OrdinalIgnoreCase);
             CatalogRequestCount = 0;
             TagsRequestCount = 0;
+            CapturedTokenSubjects.Clear();
         }
     }
 
@@ -63,6 +67,8 @@ public class FakeDockerRegistryHandler : HttpMessageHandler
 
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+        RecordTokenSubject(request.Headers.Authorization);
+
         var path = Uri.UnescapeDataString(request.RequestUri?.AbsolutePath ?? string.Empty);
 
         if (request.Method == HttpMethod.Get && path == "/v2/_catalog")
@@ -329,6 +335,37 @@ public class FakeDockerRegistryHandler : HttpMessageHandler
         }
 
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+    }
+
+    private void RecordTokenSubject(AuthenticationHeaderValue? authorization)
+    {
+        if (authorization is null || !string.Equals(authorization.Scheme, "Bearer", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(authorization.Parameter))
+        {
+            return;
+        }
+
+        var parts = authorization.Parameter.Split('.');
+        if (parts.Length < 2)
+        {
+            return;
+        }
+
+        try
+        {
+            var payloadJson = Base64UrlEncoder.Decode(parts[1]);
+            using var doc = JsonDocument.Parse(payloadJson);
+            if (doc.RootElement.TryGetProperty("sub", out var subProp) && subProp.GetString() is { Length: > 0 } sub)
+            {
+                lock (_lock)
+                {
+                    CapturedTokenSubjects.Add(sub);
+                }
+            }
+        }
+        catch
+        {
+            // Ignore malformed auth headers in fake handler
+        }
     }
 
     private static HttpResponseMessage JsonResponse(HttpStatusCode statusCode, string json, string mediaType = "application/json")
